@@ -1,0 +1,20 @@
+{
+  "name": "lcp-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lake Champlain Pools, Spas & Stoves — operating platform",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:generate": "npm run generate -w @lcp/db",
+    "db:migrate": "npm run migrate -w @lcp/db",
+    "db:studio": "npm run studio -w @lcp/db",
+    "etl": "npm run start -w @lcp/etl"
+  }
+}

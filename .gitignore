@@ -1,0 +1,30 @@
+node_modules/
+.next/
+dist/
+build/
+out/
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# ETL working data - NEVER commit customer data
+/data/
+*.csv
+*.jsonl
+*.bak
+*.dmp
+
+# logs
+*.log
+npm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# pglite dev database
+.pgdata/
