@@ -202,6 +202,57 @@ async function verify() {
   check('nameless account still importable and findable by number',
     (await hit('20883')).length > 0);
 
+  // Regression: trigram similarity treats all 802 numbers as alike, so fuzzy
+  // matching on digits returned the entire customer list. A nearly-correct
+  // phone number is a DIFFERENT customer, and showing it at a counter is how
+  // the wrong account gets charged.
+  const byPhone = await hit('8025557700');
+  check('phone search returns only that phone, not every 802 number',
+    byPhone.length === 1 && byPhone[0]?.display_name === 'Basin Harbor Club LLC',
+    `${byPhone.length} hit(s)`);
+
+  const sharedPhone = await hit('8025550142');
+  check('a shared household phone returns exactly the accounts that share it',
+    sharedPhone.length === 2, `${sharedPhone.length} hit(s)`);
+
+  check('a phone number that belongs to nobody returns nothing',
+    (await hit('8025559999')).length === 0);
+
+  check('names still match fuzzily after the numeric fix',
+    (await hit('whitcom')).length > 0);
+
+  // Regression: date-only legacy values stored at UTC midnight rendered a day
+  // early everywhere east of Greenwich-minus-nothing. Pinned to local noon.
+  check('a 2018-10-14 delivery reads as Oct 14 in Vermont, not Oct 13',
+    rows(await db.execute(dsql`
+      SELECT to_char(occurred_at AT TIME ZONE 'America/New_York', 'YYYY-MM-DD') AS d
+      FROM timeline_event WHERE legacy_id='H-1003'`))[0]?.d === '2018-10-14');
+
+  // Regression: multi-word queries were matched as one literal phrase, so
+  // "beauchamp robert" found nothing while "beauchamp" worked. Staff type names
+  // in whatever order comes to mind.
+  check('surname-first search works', (await hit('beauchamp robert')).length > 0);
+  check('given-name-first search works', (await hit('robert beauchamp')).length > 0);
+  check('name plus town narrows correctly',
+    (await hit('whitcomb colchester')).length >= 1);
+  check('a second word narrows rather than widens',
+    (await hit('beauchamp zzzz')).length === 0);
+
+  // Regression: addresses were absent from the haystack, so narrowing by town
+  // - the thing staff do constantly, because half the county shares a surname -
+  // returned nothing.
+  check('street address finds the customer',
+    (await hit('42 lakeview')).length > 0);
+  check('a service-property address finds its owner',
+    (await hit('malletts bay')).length > 0);
+  check('town alone lists everyone in that town',
+    (await hit('colchester')).length >= 2);
+
+  check('a 5/12/2007 invoice reads as May 12',
+    rows(await db.execute(dsql`
+      SELECT to_char(occurred_at AT TIME ZONE 'America/New_York', 'YYYY-MM-DD') AS d
+      FROM timeline_event WHERE legacy_id='H-1001'`))[0]?.d === '2007-05-12');
+
   // Idempotency: the whole point of the design.
   const before = rows(await db.execute(dsql`SELECT count(*)::int n FROM customer`))[0].n;
   await close();

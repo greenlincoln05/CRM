@@ -26,6 +26,18 @@ import {
 
 const SOURCE = config.legacy.source;
 
+/**
+ * Legacy dates carry a calendar day and no time. Storing them at UTC midnight
+ * made every one of them render a day early in Eastern time - a 2018-10-14
+ * delivery showed as Oct 13. Service history that is visibly off by a day is
+ * exactly how staff stop trusting a new system.
+ *
+ * So date-only values are pinned to local noon, which no timezone offset or DST
+ * transition can push onto a neighbouring day. Genuine timestamps (a text
+ * message, a card swipe) keep their real instant and are unaffected.
+ */
+const BUSINESS_TZ = 'America/New_York';
+
 type Ctx = { db: any; batchId: string; issues: number };
 
 async function recordIssue(ctx: Ctx, entity: string, legacyId: string | null, issue: Issue, payload?: unknown) {
@@ -200,7 +212,9 @@ export async function transformCustomers(opts: { limit?: number } = {}) {
         await db.execute(dsql`
           INSERT INTO timeline_event (customer_id, occurred_at, kind, source, title, body,
                                       legacy_source, legacy_id, import_batch_id)
-          VALUES (${customerId}, ${since.value ?? '2006-01-01'}::timestamptz, 'note', ${SOURCE},
+          VALUES (${customerId},
+                  ${(since.value ?? '2006-01-01') + ' 12:00:00'}::timestamp AT TIME ZONE ${BUSINESS_TZ},
+                  'note', ${SOURCE},
                   'Account note (migrated from Evosus)', ${notes},
                   ${SOURCE}, ${`CNOTE-${legacy_id}`}, ${batchId})
           ON CONFLICT (legacy_source, legacy_id) WHERE legacy_id IS NOT NULL DO NOTHING
@@ -377,7 +391,8 @@ export async function transformHistory(opts: { limit?: number } = {}) {
                                     legacy_source, legacy_id, import_batch_id)
         VALUES (${customerId},
                 ${propLegacyId ? propByLegacy.get(propLegacyId) ?? null : null},
-                ${occurred.value}::timestamptz, ${kind}, ${SOURCE},
+                ${occurred.value + ' 12:00:00'}::timestamp AT TIME ZONE ${BUSINESS_TZ},
+                ${kind}, ${SOURCE},
                 ${cleanText(pick(payload, m.title!))}, ${cleanText(pick(payload, m.body!))},
                 ${rawKind || null}, ${legacy_id}, ${cleanText(pick(payload, m.actorLabel!))},
                 ${JSON.stringify(amount !== null ? { amount } : {})}::jsonb,

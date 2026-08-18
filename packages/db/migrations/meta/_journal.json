@@ -22,6 +22,27 @@
       "when": 1787062273235,
       "tag": "0002_customer_search_fn",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787087846439,
+      "tag": "0003_numeric_search_exact",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787088038422,
+      "tag": "0004_token_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787088107035,
+      "tag": "0005_search_includes_addresses",
+      "breakpoints": true
     }
   ]
 }

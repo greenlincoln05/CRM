@@ -14,8 +14,8 @@ data migration are working and tested. No UI yet — that's next.
 | Append-only timeline | working, enforced in the database |
 | Evosus schema discovery | written, needs a real server to run against |
 | Legacy extract (SQL Server + CSV) | written, CSV path tested |
-| Legacy transform + data quality reporting | working, 21 checks passing |
-| Web app | not started |
+| Legacy transform + data quality reporting | working, 30 checks passing |
+| Web app (search, customer detail, timeline) | working |
 | Technician mobile app | not started |
 | Inventory, purchasing, POS | not started — see the roadmap |
 
@@ -36,7 +36,17 @@ npm run db:migrate
 npm run etl -- demo
 ```
 
-That last command runs the entire migration pipeline end to end against
+```bash
+npm run dev -w @lcp/web
+```
+
+The app runs at http://localhost:3100.
+
+> PGlite allows a single writer. Stop the dev server before running `npm run etl`,
+> or the ETL cannot open the database. This does not apply once `DATABASE_URL`
+> points at a real Postgres.
+
+The demo command runs the entire migration pipeline end to end against
 synthetic legacy data built to mimic twenty-year-old records — 7-digit phone
 numbers, ZIPs missing a leading zero, two people in one name field, orphaned
 invoices — and then verifies the result. It is the fastest way to see what the
