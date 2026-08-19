@@ -90,3 +90,15 @@ export * from './crypto.js';
 export * from './env.js';
 export * from './auth.js';
 export * from './write/index.js';
+
+/**
+ * The selling-channel port: types and one interface, no implementation.
+ * Exported so an adapter that speaks HTTP — which belongs in its own package,
+ * with its own credentials and retry policy — can implement it from outside.
+ *
+ * channels/fake.js is intentionally NOT re-exported. It is a test double, and
+ * the one place it should ever be reachable from is a test that imports it by
+ * path. A fake selling channel wired into the app by an incautious
+ * auto-import would push the catalogue into a Map and report success.
+ */
+export * from './channels/port.js';

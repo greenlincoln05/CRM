@@ -3,3 +3,4 @@ export * from './import.js';
 export * from './customer.js';
 export * from './timeline.js';
 export * from './work.js';
+export * from './inventory.js';

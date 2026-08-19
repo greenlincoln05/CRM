@@ -28,8 +28,14 @@ import {
   addNote, setEventPinned, redactEvent, unredactEvent,
   recordWaterTest, flagReadings,
   createWorkOrder, rescheduleWorkOrder, cancelWorkOrder, TASK_TEMPLATES,
+  listItemOnChannel, pushAvailabilityToChannel, pullChannelOrders,
   WriteError,
 } from './write/index.js';
+// Imported by path rather than from the package root, and deliberately so: the
+// fake is a test double and index.ts does not re-export it. See the comment
+// there.
+import { InMemoryChannel } from './channels/fake.js';
+import type { ChannelItem, ChannelListingRef } from './channels/port.js';
 
 // Gate-code encryption needs a key. A throwaway one is correct here: this suite
 // asserts that the value is unreadable without the key, not which key it is.
@@ -72,7 +78,8 @@ for (const t of ['timeline_event', 'water_test']) {
 }
 await db.execute(sql`TRUNCATE customer, address, contact, property, property_equipment,
   app_user, app_session, sensitive_access_log, water_test, timeline_event,
-  work_order, work_order_task, import_batch, import_issue, legacy_row
+  work_order, work_order_task, item, item_barcode, item_fitment, channel_listing,
+  import_batch, import_issue, legacy_row
   RESTART IDENTITY CASCADE`);
 for (const t of ['timeline_event', 'water_test']) {
   await db.execute(sql.raw(`ALTER TABLE ${t} ENABLE TRIGGER USER`));
@@ -879,6 +886,275 @@ check('the database refuses two jobs claiming the same number',
     INSERT INTO work_order (number, customer_id, legacy_source)
     VALUES (${jobOne.number}, ${created.id}::uuid, 'manual')
   `)))?.includes('work_order_number_unique_idx') === true);
+
+console.log(`\n── The selling-channel seam ${'─'.repeat(34)}\n`);
+
+/**
+ * Everything below runs against an in-memory channel, and that is the point
+ * rather than a shortcut. There is no Shopify account, no credential and no
+ * webhook endpoint for this business, so a live sync would be untested code
+ * from its first line and would stay untested until somebody buys the account.
+ * The rules — one listing per item, one item per external id, a bad order line
+ * becomes a row — are the expensive part to get wrong, and they test perfectly
+ * against nothing.
+ */
+const shopify = new InMemoryChannel('shopify');
+
+const [seal, hose] = rows<{ id: string; sku: string }>(await db.execute(sql`
+  INSERT INTO item (sku, description, manufacturer, model, uom, category, legacy_source)
+  VALUES
+    ('SP1600Z2', 'Shaft seal, Super Pump', 'Hayward', 'SP1600', 'each', 'part', 'manual'),
+    ('HOSE-BW-15', 'Backwash hose, 1.5in', 'Generic', NULL, 'foot', 'accessory', 'manual')
+  RETURNING id, sku
+`));
+await db.execute(sql`
+  INSERT INTO item_barcode (item_id, code, symbology, legacy_source)
+  VALUES (${seal!.id}::uuid, '0012345678905', 'ean_13', 'manual')
+`);
+const discontinued = rows<{ id: string }>(await db.execute(sql`
+  INSERT INTO item (sku, description, uom, active, legacy_source)
+  VALUES ('SP1600Z2-OLD', 'Shaft seal, superseded', 'each', false, 'manual')
+  RETURNING id
+`))[0]!;
+
+// ── Pushing an item outward ────────────────────────────────────────────────
+
+const listed = await listItemOnChannel(db, manager, shopify, { itemId: seal!.id });
+check('pushing an item to a channel creates a listing',
+  listed.created === true && listed.externalId !== '',
+  `external id ${listed.externalId}`);
+
+check('and the channel was told the SKU and the barcodes, and nothing else',
+  shopify.listings.get(listed.externalId)?.sku === 'SP1600Z2'
+  && shopify.listings.get(listed.externalId)?.barcodes.join() === '0012345678905'
+  && !('price' in (shopify.listings.get(listed.externalId) ?? {})));
+
+check('the listing records when we last spoke to the channel',
+  rows<{ n: number }>(await db.execute(sql`
+    SELECT count(*)::int AS n FROM channel_listing
+     WHERE item_id = ${seal!.id}::uuid AND channel = 'shopify'
+       AND listed AND last_pushed_at IS NOT NULL
+  `))[0]!.n === 1);
+
+// Re-pushing is how an edited description reaches the storefront, so it has to
+// be an ordinary thing to do repeatedly — a second listing for the same item
+// would mean two availability numbers for one pile of stock.
+const rePushed = await listItemOnChannel(db, manager, shopify, { itemId: seal!.id });
+check('re-pushing the same item is idempotent: one listing, same external id',
+  rePushed.created === false
+  && rePushed.listingId === listed.listingId
+  && rePushed.externalId === listed.externalId
+  && shopify.pushItemCalls === 2
+  && shopify.listings.size === 1,
+  `${shopify.pushItemCalls} pushes -> ${shopify.listings.size} listing(s)`);
+
+check('and the item still has exactly one row on that channel',
+  rows<{ n: number }>(await db.execute(sql`
+    SELECT count(*)::int AS n FROM channel_listing
+     WHERE item_id = ${seal!.id}::uuid AND channel = 'shopify'
+  `))[0]!.n === 1);
+
+check('a discontinued item is not put on a storefront',
+  (await refused(() => listItemOnChannel(db, manager, shopify, { itemId: discontinued.id })))
+    ?.includes('discontinued and cannot be offered') === true);
+
+check('a technician may not publish the catalogue to a sales channel',
+  (await refused(() => listItemOnChannel(db, tech, shopify, { itemId: hose!.id })))
+    ?.includes('permission to manage sales channels') === true);
+
+// ── One external id, one item ──────────────────────────────────────────────
+
+/**
+ * A channel that hands back the same id for everything.
+ *
+ * Not a straw man: an adapter that echoes a request id, a sandbox account that
+ * stubs its responses, or a paginated push whose second page silently repeats
+ * the first all produce exactly this. Whatever the cause, the consequence is
+ * the one that matters — an inbound order line for that id resolving to
+ * whichever of two items came back first, which is somebody picking the wrong
+ * part off the shelf.
+ */
+class StuckIdChannel extends InMemoryChannel {
+  override async pushItem(item: ChannelItem): Promise<ChannelListingRef> {
+    await super.pushItem(item);
+    return { externalId: 'STUCK-1', externalHandle: null };
+  }
+}
+const stuck = new StuckIdChannel('other');
+
+check('the first item through a stuck channel maps fine',
+  (await listItemOnChannel(db, manager, stuck, { itemId: seal!.id })).created === true);
+
+check('a second item cannot claim an external id another item already holds',
+  (await refused(() => listItemOnChannel(db, manager, stuck, { itemId: hose!.id })))
+    ?.includes('already mapped to a different item') === true);
+
+check('and the refusal left no second row behind',
+  rows<{ n: number }>(await db.execute(sql`
+    SELECT count(*)::int AS n FROM channel_listing WHERE channel = 'other'
+  `))[0]!.n === 1);
+
+// The friendly message above is a pre-flight check, and two terminals can both
+// pass it before either commits. The index is the guarantee.
+check('the database refuses two items claiming one external id',
+  (await refused(() => db.execute(sql`
+    INSERT INTO channel_listing (item_id, channel, external_id, legacy_source)
+    VALUES (${hose!.id}::uuid, 'shopify', ${listed.externalId}, 'manual')
+  `)))?.includes('channel_listing_external_unique_idx') === true);
+
+check('and refuses one item holding two listings on one channel',
+  (await refused(() => db.execute(sql`
+    INSERT INTO channel_listing (item_id, channel, external_id, legacy_source)
+    VALUES (${seal!.id}::uuid, 'shopify', 'SOME-OTHER-ID', 'manual')
+  `)))?.includes('channel_listing_item_unique_idx') === true);
+
+// ── Pushing availability ───────────────────────────────────────────────────
+
+const callsBefore = shopify.pushAvailabilityCalls;
+check('availability is refused for an item that is not listed',
+  (await refused(() => pushAvailabilityToChannel(db, manager, shopify, {
+    itemId: hose!.id, available: 240,
+  })))?.includes('not listed on shopify') === true);
+
+// It has to be refused HERE, not by the adapter. A real one would be spending a
+// network call and a rate-limit slot on a request our own rules call invalid.
+check('and the channel was never called',
+  shopify.pushAvailabilityCalls === callsBefore);
+
+check('availability pushes for a listed item',
+  (await pushAvailabilityToChannel(db, manager, shopify, {
+    itemId: seal!.id, available: 12,
+  })).available === 12
+  && shopify.availability.get(listed.externalId) === 12);
+
+// uom is not always countable: 73.5 feet off a 100ft coil is a real number.
+check('a fractional availability is allowed, because uom is not always countable',
+  (await refused(() => pushAvailabilityToChannel(db, manager, shopify, {
+    itemId: seal!.id, available: 73.5,
+  }))) === null);
+
+check('a negative availability is refused',
+  (await refused(() => pushAvailabilityToChannel(db, manager, shopify, {
+    itemId: seal!.id, available: -1,
+  })))?.includes('cannot be negative') === true);
+
+await db.execute(sql`
+  UPDATE channel_listing SET listed = false WHERE id = ${listed.listingId}::uuid
+`);
+check('a delisted item is refused too, and the mapping is kept rather than deleted',
+  (await refused(() => pushAvailabilityToChannel(db, manager, shopify, {
+    itemId: seal!.id, available: 12,
+  })))?.includes('delisted on shopify') === true);
+await db.execute(sql`
+  UPDATE channel_listing SET listed = true WHERE id = ${listed.listingId}::uuid
+`);
+
+// ── Pulling orders inward ──────────────────────────────────────────────────
+
+shopify.seedOrder({
+  externalOrderId: 'SHOP-1001',
+  placedAt: new Date('2026-08-14T15:00:00Z'),
+  customerEmail: 'bob.beauchamp@example.com',
+  customerName: 'Bob Beauchamp',
+  lines: [
+    { externalId: listed.externalId, quantity: 2, description: 'Shaft seal' },
+    // Added in the Shopify admin instead of here, so it maps to nothing. This
+    // is the ordinary case, not the exotic one.
+    { externalId: 'SHOPIFY-ONLY-99', quantity: 1, description: 'Pool noodle, blue' },
+  ],
+});
+shopify.seedOrder({
+  externalOrderId: 'SHOP-1002',
+  placedAt: new Date('2026-08-15T12:30:00Z'),
+  customerEmail: 'someone@example.com',
+  customerName: null,
+  lines: [{ externalId: listed.externalId, quantity: 1, description: 'Shaft seal' }],
+});
+
+const itemsBefore = rows<{ n: number }>(await db.execute(sql`
+  SELECT count(*)::int AS n FROM item
+`))[0]!.n;
+
+const pull = await pullChannelOrders(db, manager, shopify, { since: null });
+
+check('a pull that meets bad data still completes',
+  pull.orders === 2 && pull.lines === 3,
+  `${pull.orders} order(s), ${pull.lines} line(s)`);
+
+check('the line naming an unknown external id is counted as a problem',
+  pull.problems === 1 && pull.resolved === 2);
+
+// Non-negotiable #3: bad data becomes a row, never an exception and never a
+// silent null. A dropped order line is a customer who paid for something
+// nobody is picking, discovered when they phone up asking where it is.
+const issue = rows<{ code: string; legacy_id: string; message: string; severity: string }>(
+  await db.execute(sql`
+    SELECT code, legacy_id, message, severity FROM import_issue
+     WHERE batch_id = ${pull.batchId}::uuid
+  `));
+check('and it is recorded as an import_issue rather than silently dropped',
+  issue.length === 1
+  && issue[0]!.code === 'UNKNOWN_CHANNEL_LISTING'
+  && issue[0]!.legacy_id === 'SHOPIFY-ONLY-99'
+  && issue[0]!.severity === 'error',
+  issue[0]?.message);
+
+check('the issue names the order, so it can be looked up in their admin',
+  issue[0]!.message.includes('SHOP-1001') && issue[0]!.message.includes('Pool noodle'));
+
+check('the pull run is a batch that can be reported on and re-read',
+  rows<{ status: string }>(await db.execute(sql`
+    SELECT status FROM import_batch WHERE id = ${pull.batchId}::uuid
+  `))[0]?.status === 'succeeded');
+
+check('and it carries a watermark, so the next pull can resume',
+  (rows<{ watermark: string | null }>(await db.execute(sql`
+    SELECT watermark FROM import_batch WHERE id = ${pull.batchId}::uuid
+  `))[0]!.watermark ?? '').startsWith('2026-08-15'));
+
+// THE constraint. An order for something we do not sell does not get to invent
+// a part; that is the channel becoming the item master through the back door.
+check('an unknown external id did NOT create an item',
+  rows<{ n: number }>(await db.execute(sql`
+    SELECT count(*)::int AS n FROM item
+  `))[0]!.n === itemsBefore);
+
+check('nor edit the item master to match what the channel says',
+  rows<{ description: string }>(await db.execute(sql`
+    SELECT description FROM item WHERE id = ${seal!.id}::uuid
+  `))[0]!.description === 'Shaft seal, Super Pump');
+
+check('the half-resolved order is held back, and the clean one comes through',
+  pull.pulled.length === 1
+  && pull.pulled[0]!.externalOrderId === 'SHOP-1002'
+  && pull.pulled[0]!.lines[0]!.sku === 'SP1600Z2');
+
+check('a resolved line records that the listing was heard from',
+  rows<{ n: number }>(await db.execute(sql`
+    SELECT count(*)::int AS n FROM channel_listing
+     WHERE id = ${listed.listingId}::uuid AND last_pulled_at IS NOT NULL
+  `))[0]!.n === 1);
+
+check('a technician may not pull orders either',
+  (await refused(() => pullChannelOrders(db, tech, shopify, {})))
+    ?.includes('permission to manage sales channels') === true);
+
+// ── ADR 0001: this is not a money phase ────────────────────────────────────
+//
+// A price column on a storefront-facing table is the shortest path there is to
+// an inventory phase quietly becoming a money phase, and it would arrive as a
+// one-line "we need it for the Shopify push". Money cuts over January–March;
+// it is August. Assert the absence rather than trusting the comment.
+const MONEY_WORDS = /(price|cost|amount|total|charge|tax|discount)/i;
+for (const table of ['item', 'channel_listing']) {
+  const money = rows<{ column_name: string }>(await db.execute(sql`
+    SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = ${table}
+  `)).map((c) => c.column_name).filter((c) => MONEY_WORDS.test(c));
+  check(`${table} carries no money column`,
+    money.length === 0, money.length ? `found: ${money.join(', ')}` : '');
+}
+
 
 console.log('\n── Every write carries a name ─────────────────────────────\n');
 
