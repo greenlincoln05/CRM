@@ -1,7 +1,8 @@
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
-  SESSION_COOKIE, SESSION_TTL_HOURS, signIn, signOut, verifySession,
+  SESSION_COOKIE, SESSION_TTL_HOURS, canDispatch as canDispatchWrite,
+  signIn, signOut, verifySession,
   type SessionUser,
 } from '@lcp/db';
 import { getDb } from './db';
@@ -40,6 +41,21 @@ export async function requireUser(): Promise<SessionUser> {
 /** Managers and admins can hide timeline entries. Everyone else cannot. */
 export function canRedact(user: SessionUser): boolean {
   return user.role === 'admin' || user.role === 'manager';
+}
+
+/**
+ * Whether this person may put work on the board.
+ *
+ * A re-export of the write layer's own predicate, not a second copy of the role
+ * list. The refusal that counts is the one in createWorkOrder /
+ * rescheduleWorkOrder / cancelWorkOrder - this exists so a page can hide a
+ * button rather than offer a form that is going to be refused, and two
+ * definitions of "the office" would eventually disagree about who that is.
+ * Note the list includes 'staff': every counter account defaults to it, and
+ * `admin || manager` here would hide the schedule from the entire office.
+ */
+export function canDispatch(user: SessionUser): boolean {
+  return canDispatchWrite(user);
 }
 
 export async function startSession(

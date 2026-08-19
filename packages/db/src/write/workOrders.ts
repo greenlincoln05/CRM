@@ -13,7 +13,7 @@ import {
  * `npm run etl -- seed:jobs` fixture, which meant the technician PWA consumed
  * rows the office had no way of making. This is the other half of that.
  *
- * Three things here are business rules rather than plumbing, and they live at
+ * Four things here are business rules rather than plumbing, and they live at
  * this layer so that the server action and anything Sprint 4 builds get them
  * for free. (The seed fixture is not among them — it hand-rolls its own INSERT
  * and borrows only `tasksForType`, so it skips the ownership check, the
@@ -35,6 +35,14 @@ import {
  *      phone, which is how a step gets skipped. Every job type carries the
  *      checklist that job type always covers, seeded at creation, exactly as
  *      the schema comment on work_order_task says it should be.
+ *
+ *   4. Dispatching is an office job. Booking, moving and calling off work is
+ *      refused to `tech`, because until this landed the office pages were
+ *      gated on having a session and nothing else - so a technician could open
+ *      /schedule, assign any job at any property to themselves, and the
+ *      gate-code check in /api/gate-code would then correctly hand over the
+ *      code. ADR 0009 names that gap as the reason its own scoping is "an
+ *      accident control, not a boundary"; this is the other half.
  */
 
 export const WORK_ORDER_TYPES = [
@@ -50,6 +58,68 @@ export const WORK_ORDER_PRIORITIES = ['low', 'normal', 'urgent'] as const;
 export type WorkOrderType = typeof WORK_ORDER_TYPES[number];
 export type WorkOrderStatus = typeof WORK_ORDER_STATUSES[number];
 export type WorkOrderPriority = typeof WORK_ORDER_PRIORITIES[number];
+
+/**
+ * Who may put work on the board.
+ *
+ * An allow-list rather than `role !== 'tech'`, on the same reasoning as
+ * REDACTION_ROLES in timeline.ts: a role added to app_user next year - a
+ * 'contractor', a 'vendor', a read-only 'viewer' - is refused until somebody
+ * decides otherwise, instead of being silently handed the schedule by a
+ * predicate written before it existed.
+ *
+ * 'staff' IS in here, and that is the whole point rather than an oversight.
+ * Both auth.ts and user-cli.ts default a new account to 'staff', so every
+ * person behind the counter is staff; the `admin || manager` predicate used by
+ * the technician routes would 403 the entire office. ADR 0009 spells this out
+ * for the gate-code reveal and the same trap is here. The question is "is this
+ * person in the field", not "is this person senior". apps/web/scripts/
+ * smoke-tech-api.ts already asserts a new account gets the office role, and the
+ * work-order checks in smoke-writes.ts assert staff can dispatch - between them
+ * a future "tightening" to admin || manager fails loudly rather than in April.
+ *
+ * The string is 'tech'. Not 'technician' - app_user.role has never held that
+ * value, and a predicate testing for it would fail open, which is the one
+ * direction an authorization typo must not fail.
+ */
+const DISPATCH_ROLES = new Set(['admin', 'manager', 'staff']);
+
+/** Whether this actor may book, move or call off work. */
+export function canDispatch(actor: { role: string }): boolean {
+  return DISPATCH_ROLES.has(actor.role);
+}
+
+/**
+ * The dispatch gate, run before anything is looked up.
+ *
+ * Deliberately the FIRST thing every write below does - ahead of
+ * loadWorkOrder, ahead of customerExists - so that a refusal says only "you may
+ * not do this" and never doubles as confirmation that a given job id or
+ * customer id is real. Same reasoning as the pre-lookup placement of the
+ * technician check in apps/web/app/api/gate-code/route.ts.
+ *
+ * The message does not mention roles, does not name who does have the power,
+ * and does not suggest self-assignment as a route around it, for the same
+ * reason the 403 in that route stops short of "or ask to be assigned the job":
+ * an error is not the place to publish the bypass.
+ */
+function assertMayDispatch(actor: Actor, assignedUserId?: unknown, field = 'workOrderId'): void {
+  if (!canDispatch(actor)) {
+    throw new WriteError('You do not have permission to schedule work.', field);
+  }
+
+  // Belt and braces, and it stays even though the allow-list above already
+  // makes it unreachable. Office roles MAY assign a job to themselves - in a
+  // ten-person shop the manager sometimes drives the delivery, which is why
+  // getTechnicians() returns every active user rather than filtering by role -
+  // so the rule that actually matters is narrower than "nobody self-assigns".
+  // Written out explicitly, a later edit to DISPATCH_ROLES cannot quietly
+  // reopen the exact hole ADR 0009 describes: a technician handing themselves
+  // a job and, with it, the gate code for that house.
+  if (actor.role === 'tech' && assignedUserId != null && assignedUserId === actor.userId) {
+    throw new WriteError('You do not have permission to schedule work.', 'assignedUserId');
+  }
+}
 
 /**
  * What each kind of visit always covers.
@@ -259,6 +329,8 @@ function scheduleLine(v: {
 export async function createWorkOrder(
   db: Db, actor: Actor, input: WorkOrderInput,
 ): Promise<{ id: string; number: string; tasks: number }> {
+  assertMayDispatch(actor, clean(input.assignedUserId), 'customerId');
+
   const customerId = assertUuid(input.customerId, 'customerId');
 
   const type = oneOf(input.type, WORK_ORDER_TYPES, 'type', 'service');
@@ -383,6 +455,8 @@ const jobLabel = (w: WorkOrderRow) => (w.number ? `Job ${w.number}` : 'That job'
 export async function rescheduleWorkOrder(
   db: Db, actor: Actor, input: RescheduleInput,
 ): Promise<{ id: string; changes: string[] }> {
+  assertMayDispatch(actor, clean(input.assignedUserId));
+
   const before = await loadWorkOrder(db, input.workOrderId);
 
   if (before.status === 'complete' || before.status === 'cancelled') {
@@ -464,6 +538,8 @@ export async function rescheduleWorkOrder(
 export async function cancelWorkOrder(
   db: Db, actor: Actor, input: CancelInput,
 ): Promise<{ id: string }> {
+  assertMayDispatch(actor);
+
   const before = await loadWorkOrder(db, input.workOrderId);
   const reason = required(input.reason, 'reason', 'A reason for cancelling');
 

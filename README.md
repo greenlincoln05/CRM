@@ -114,8 +114,12 @@ npm run db:user -- deactivate --email dana@example.com # leaver: ends their sess
 ```
 
 Set `LCP_PIN` in the environment rather than passing `--pin`, unless you want the
-PIN in your shell history. Roles are `admin`, `manager`, `staff`, `tech`; the only
-thing the role currently gates is hiding a timeline entry.
+PIN in your shell history. Roles are `admin`, `manager`, `staff`, `tech`, and the
+split that matters is office versus field rather than seniority — a new account
+defaults to `staff`, which is the counter. `tech` is the narrower one: it cannot
+schedule, move or cancel work (ADR 0010), and it sees a gate code only for a
+property it has an assigned job on (ADR 0009). Role also gates hiding a timeline
+entry, and the technician endpoints.
 
 > `npm run check` truncates and rebuilds the database it runs against. Point
 > `PGLITE_DIR` somewhere scratch if that is not your dev data.

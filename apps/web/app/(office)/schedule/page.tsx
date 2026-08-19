@@ -6,7 +6,7 @@ import {
   fmtDay, jobIsOpen, jobStatusClass, jobStatusLabel, jobTypeLabel,
   parseDay, shiftDay, today,
 } from '@/lib/jobs';
-import { requireUser } from '@/lib/session';
+import { canDispatch, requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,9 +76,14 @@ function addressLine(j: ScheduledJobRow): string | null {
   return [j.line1, town].filter(Boolean).join(', ');
 }
 
-function JobRow({ job, technicians }: {
+function JobRow({ job, technicians, mayDispatch }: {
   job: ScheduledJobRow;
   technicians: Awaited<ReturnType<typeof getTechnicians>>;
+  // Decided once in the page, from the session, and handed down as a plain
+  // boolean. The role itself does not travel: this row is a server component
+  // today, and passing `user` would put the answer one 'use client' away from
+  // the browser the first time someone makes part of the board interactive.
+  mayDispatch: boolean;
 }) {
   const open = jobIsOpen(job.status);
   const address = addressLine(job);
@@ -129,7 +134,14 @@ function JobRow({ job, technicians }: {
           <div className="note">Called off — the reason is on the customer's timeline.</div>
         )}
 
-        {open && (
+        {/* COSMETIC. rescheduleWorkOrder refuses a technician itself, before it
+            looks the job up, and that refusal is the boundary; this only stops
+            the board offering a form whose one outcome would be "You do not
+            have permission to schedule work." Prove the rule by calling the
+            action directly, not by reading this file. The row loses nothing it
+            needs to be read - customer, window, type, address, status all sit
+            above - so a technician gets a legible board, just not a lever. */}
+        {open && mayDispatch && (
           <details className="panel">
             <summary>Reschedule or reassign</summary>
             {/* Every field pre-filled from the row: the write layer sets all
@@ -163,7 +175,10 @@ function JobRow({ job, technicians }: {
 export default async function SchedulePage({ searchParams }: {
   searchParams: Promise<{ date?: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
+  // Resolved here, server-side, and passed down as a boolean. Reads stay open
+  // this session: a technician can still look at the whole board.
+  const mayDispatch = canDispatch(user);
 
   const params = await searchParams;
   // A date out of a URL is user input. Anything that is not a real day falls
@@ -234,7 +249,10 @@ export default async function SchedulePage({ searchParams }: {
           {/* Unassigned is its own bucket, last, because it is the work still
               needing a name against it rather than a technician called NULL. */}
           {g.jobs.map((job) => (
-            <JobRow key={job.id} job={job} technicians={technicians} />
+            <JobRow
+              key={job.id} job={job} technicians={technicians}
+              mayDispatch={mayDispatch}
+            />
           ))}
         </div>
       ))}

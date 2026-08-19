@@ -20,7 +20,7 @@ import {
 import {
   fmtDay, jobIsOpen, jobStatusClass, jobStatusLabel, jobTypeLabel,
 } from '@/lib/jobs';
-import { canRedact, requireUser } from '@/lib/session';
+import { canDispatch, canRedact, requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,6 +90,15 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
     getProperties(id), getContacts(id), getTimeline(id), getWaterTests(id),
     getWorkOrders(id), getTechnicians(),
   ]);
+
+  // Whether to draw the scheduling controls at all. COSMETIC, and only that:
+  // the boundary is in the write layer - createWorkOrder, rescheduleWorkOrder
+  // and cancelWorkOrder each refuse a technician before they look anything up.
+  // Hiding the forms is a courtesy, so nobody is invited to fill in a form that
+  // is going to come back refused. Anyone wanting to prove the boundary should
+  // call the action directly rather than trust this page, which is exactly how
+  // it was verified. Reads are untouched: a technician still sees the record.
+  const mayDispatch = canDispatch(user);
 
   // Only live properties are offered as the subject of a new note or test.
   const propertyOptions = properties
@@ -412,7 +421,11 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 <div className="flag"><b>Left unfinished</b> · {j.incomplete_reason}</div>
               )}
 
-              {open && (
+              {/* No panel for someone who cannot dispatch. The row above still
+                  says everything about the job - when, who, what, whether it
+                  was left unfinished - so it reads as a record rather than a
+                  heading with nothing under it. Cosmetic; see `mayDispatch`. */}
+              {open && mayDispatch && (
                 <details className="panel">
                   <summary>Reschedule or cancel</summary>
                   {/* Pre-filled from the row on purpose: rescheduleWorkOrder
@@ -442,13 +455,19 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
           );
         })}
 
-        <details className="panel">
-          <summary>Schedule a job</summary>
-          <ActionForm action={createWorkOrderAction} submitLabel="Schedule job" resetOnSuccess>
-            <input type="hidden" name="customerId" value={customer.id} />
-            <JobFields propertyOptions={propertyOptions} technicians={technicians} />
-          </ActionForm>
-        </details>
+        {/* Same cosmetic hide as the panel above: createWorkOrder refuses a
+            technician on its own, and this only keeps the offer off the screen.
+            The card keeps its heading and its "None on the books." line either
+            way, so a technician reads a list of jobs rather than a stub. */}
+        {mayDispatch && (
+          <details className="panel">
+            <summary>Schedule a job</summary>
+            <ActionForm action={createWorkOrderAction} submitLabel="Schedule job" resetOnSuccess>
+              <input type="hidden" name="customerId" value={customer.id} />
+              <JobFields propertyOptions={propertyOptions} technicians={technicians} />
+            </ActionForm>
+          </details>
+        )}
       </div>
 
       {/* ── The feed ──────────────────────────────────────────────────── */}

@@ -83,8 +83,16 @@ console.log('\n── Authentication ──────────────�
 await createUser(db, {
   email: 'Dana@example.com', displayName: 'Dana Whitcomb', role: 'manager', pin: '4417',
 });
+// Behind the counter, not in a truck. This fixture used to be "Marcus Tech" at
+// mtech@example.com while carrying role 'staff', which made every assertion
+// written against it read as a statement about technicians and prove nothing of
+// the sort - the office-write checks below would have passed vacuously. The
+// name follows the role now, and the technician is a separate account.
 await createUser(db, {
-  email: 'mtech@example.com', displayName: 'Marcus Tech', role: 'staff', pin: '9082',
+  email: 'mpoulin@example.com', displayName: 'Marcus Poulin', role: 'staff', pin: '9082',
+});
+await createUser(db, {
+  email: 'wfortin@example.com', displayName: 'Wendy Fortin', role: 'tech', pin: '6624',
 });
 
 const stored = rows<{ pin_hash: string; email: string }>(await db.execute(sql`
@@ -129,9 +137,9 @@ check('a made-up token resolves to nobody',
 
 // Five wrong attempts, then the correct PIN, which must still be refused.
 for (let i = 0; i < 5; i++) {
-  await signIn(db, { email: 'mtech@example.com', pin: '0000' });
+  await signIn(db, { email: 'mpoulin@example.com', pin: '0000' });
 }
-const lockedOut = await signIn(db, { email: 'mtech@example.com', pin: '9082' });
+const lockedOut = await signIn(db, { email: 'mpoulin@example.com', pin: '9082' });
 check('five wrong attempts locks the account even against the right PIN',
   lockedOut.ok === false && /Too many attempts/i.test(lockedOut.ok ? '' : lockedOut.error));
 
@@ -140,26 +148,26 @@ check('five wrong attempts locks the account even against the right PIN',
 // minutes pushed the count to 6 and locked it again. The account was recoverable
 // only by getting the PIN right on the very first attempt, indefinitely.
 await db.execute(sql`UPDATE app_user SET locked_until = now() - interval '1 minute'
-  WHERE lower(email) = 'mtech@example.com'`);
-const typoAfterLockout = await signIn(db, { email: 'mtech@example.com', pin: '0001' });
+  WHERE lower(email) = 'mpoulin@example.com'`);
+const typoAfterLockout = await signIn(db, { email: 'mpoulin@example.com', pin: '0001' });
 check('one typo after serving a lockout does not re-lock the account',
   !typoAfterLockout.ok && !/Too many attempts/i.test(typoAfterLockout.error),
   typoAfterLockout.ok ? '' : `-> "${typoAfterLockout.error}"`);
 check('and the counter restarted rather than resuming at the threshold',
   Number(rows<{ failed_attempts: number }>(await db.execute(sql`
-    SELECT failed_attempts FROM app_user WHERE lower(email) = 'mtech@example.com'
+    SELECT failed_attempts FROM app_user WHERE lower(email) = 'mpoulin@example.com'
   `))[0]!.failed_attempts) === 1);
 
 await db.execute(sql`UPDATE app_user SET failed_attempts = 0, locked_until = NULL
-  WHERE lower(email) = 'mtech@example.com'`);
-const techSignIn = await signIn(db, { email: 'mtech@example.com', pin: '9082' });
-check('clearing the lockout lets the right PIN back in', techSignIn.ok === true);
-if (!techSignIn.ok) throw new Error('cannot continue without the tech session');
-const tech = techSignIn.user;
+  WHERE lower(email) = 'mpoulin@example.com'`);
+const staffSignIn = await signIn(db, { email: 'mpoulin@example.com', pin: '9082' });
+check('clearing the lockout lets the right PIN back in', staffSignIn.ok === true);
+if (!staffSignIn.ok) throw new Error('cannot continue without the staff session');
+const staff = staffSignIn.user;
 
 check('a successful sign-in resets the failed-attempt counter',
   Number(rows<{ failed_attempts: number }>(await db.execute(sql`
-    SELECT failed_attempts FROM app_user WHERE lower(email) = 'mtech@example.com'
+    SELECT failed_attempts FROM app_user WHERE lower(email) = 'mpoulin@example.com'
   `))[0]!.failed_attempts) === 0);
 
 // An expired session is not a valid one, however good the token looks.
@@ -178,18 +186,27 @@ check('signing out revokes that session immediately',
 check('signing out one session leaves the others alone',
   (await verifySession(db, managerToken))?.userId === manager.userId);
 
-const fourth = await signIn(db, { email: 'mtech@example.com', pin: '9082' });
+const fourth = await signIn(db, { email: 'mpoulin@example.com', pin: '9082' });
 if (!fourth.ok) throw new Error('expected a fourth session');
-await setPin(db, tech.userId, '7731');
+await setPin(db, staff.userId, '7731');
 check('changing a PIN signs out every session opened with the old one',
   (await verifySession(db, fourth.token)) === null);
-check('the new PIN works', (await signIn(db, { email: 'mtech@example.com', pin: '7731' })).ok === true);
+check('the new PIN works', (await signIn(db, { email: 'mpoulin@example.com', pin: '7731' })).ok === true);
 
-await db.execute(sql`UPDATE app_user SET active = false WHERE id = ${tech.userId}::uuid`);
-const deactivated = await signIn(db, { email: 'mtech@example.com', pin: '7731' });
+await db.execute(sql`UPDATE app_user SET active = false WHERE id = ${staff.userId}::uuid`);
+const deactivated = await signIn(db, { email: 'mpoulin@example.com', pin: '7731' });
 check('a deactivated account cannot sign in', deactivated.ok === false);
-await revokeAllSessions(db, tech.userId);
-await db.execute(sql`UPDATE app_user SET active = true WHERE id = ${tech.userId}::uuid`);
+await revokeAllSessions(db, staff.userId);
+await db.execute(sql`UPDATE app_user SET active = true WHERE id = ${staff.userId}::uuid`);
+
+// A real one. 'tech' is the string app_user.role actually holds - never
+// 'technician' - and the office-write checks further down are only worth
+// anything if this actor genuinely carries it.
+const techSignIn = await signIn(db, { email: 'wfortin@example.com', pin: '6624' });
+check('a technician signs in carrying the field role, not the office default',
+  techSignIn.ok && techSignIn.user.role === 'tech');
+if (!techSignIn.ok) throw new Error('cannot continue without the technician session');
+const tech = techSignIn.user;
 
 console.log('\n── Creating and editing customers ─────────────────────────\n');
 
@@ -438,7 +455,7 @@ check('archiving a property also stops it being the primary one',
 
 console.log('\n── The timeline holds ─────────────────────────────────────\n');
 
-const note = await addNote(db, tech, {
+const note = await addNote(db, staff, {
   customerId: created.id,
   propertyId: mainHouse.id,
   kind: 'call',
@@ -450,24 +467,24 @@ const note = await addNote(db, tech, {
 check('a note lands with the author attached',
   rows<{ actor_user_id: string; actor_label: string }>(await db.execute(sql`
     SELECT actor_user_id, actor_label FROM timeline_event WHERE id = ${note.id}::uuid
-  `))[0]!.actor_user_id === tech.userId);
+  `))[0]!.actor_user_id === staff.userId);
 
 check('an empty note is refused',
-  (await refused(() => addNote(db, tech, { customerId: created.id, body: '   ' }))) !== null);
+  (await refused(() => addNote(db, staff, { customerId: created.id, body: '   ' }))) !== null);
 
 check('a note cannot be dated in the future',
-  (await refused(() => addNote(db, tech, {
+  (await refused(() => addNote(db, staff, {
     customerId: created.id, body: 'next week',
     occurredAt: new Date(Date.now() + 86_400_000).toISOString(),
   })))?.includes('future') === true);
 
 check('a sale cannot be typed in by hand - that comes from the register',
-  (await refused(() => addNote(db, tech, {
+  (await refused(() => addNote(db, staff, {
     customerId: created.id, kind: 'sale', body: '$400',
   }))) !== null);
 
 check('a note cannot be attached to another customer’s property',
-  (await refused(() => addNote(db, tech, {
+  (await refused(() => addNote(db, staff, {
     customerId: created.id, propertyId: '00000000-0000-4000-8000-000000000000',
     body: 'wrong property',
   }))) !== null);
@@ -501,7 +518,7 @@ check('an entry cannot be deleted',
   `)))?.includes('append-only') === true);
 
 check('hiding an entry is not something everyone can do',
-  (await refused(() => redactEvent(db, tech, note.id, 'wrong customer')))
+  (await refused(() => redactEvent(db, staff, note.id, 'wrong customer')))
     ?.includes('manager') === true);
 
 await redactEvent(db, manager, note.id, 'Logged against the wrong account.');
@@ -655,7 +672,7 @@ const jobOne = await createWorkOrder(db, manager, {
   scheduledWindow: '8:00 – 10:00',
   estimatedMinutes: 90,
   sequence: 1,
-  assignedUserId: tech.userId,
+  assignedUserId: staff.userId,
   summary: 'Spring opening',
   instructions: 'Look at the liner seam on the north side.',
 });
@@ -699,6 +716,105 @@ check('booking a job says so on the customer’s timeline',
      WHERE ref_type = 'work_order' AND ref_id = ${jobOne.id}
        AND title LIKE ${`Job ${jobOne.number} scheduled%`}
   `)).length === 1);
+
+// ── Dispatch is office work ────────────────────────────────────────────────
+//
+// ADR 0009 named this gap by name: gate-code scoping is "an accident control,
+// not a boundary" because the office pages were gated on having a session and
+// nothing else. A technician could open /schedule, assign a job at any property
+// to themselves, and the reveal check would then correctly hand over the code.
+// These checks are the other half of that, and they sit here rather than in
+// apps/web because the refusal has to hold for every caller, not just a form.
+
+check('a technician cannot book a job',
+  (await refused(() => createWorkOrder(db, tech, {
+    customerId: created.id, propertyId: mainHouse.id, summary: 'Self-booked',
+  })))?.includes('permission to schedule work') === true);
+
+check('a technician cannot move a job',
+  (await refused(() => rescheduleWorkOrder(db, tech, {
+    workOrderId: jobOne.id, scheduledDate: '2026-05-09',
+  })))?.includes('permission to schedule work') === true);
+
+check('a technician cannot call a job off',
+  (await refused(() => cancelWorkOrder(db, tech, {
+    workOrderId: jobOne.id, reason: 'Not going.',
+  })))?.includes('permission to schedule work') === true);
+
+// The refusal must not double as a lookup: a made-up job id has to get exactly
+// the same answer as a real one, or walking ids tells a technician which jobs
+// exist. Same reasoning as the pre-lookup placement of the check in
+// apps/web/app/api/gate-code/route.ts.
+check('the refusal lands before the lookup, so it confirms nothing',
+  (await refused(() => cancelWorkOrder(db, tech, {
+    workOrderId: '00000000-0000-4000-8000-000000000000', reason: 'Not going.',
+  })))?.includes('permission to schedule work') === true);
+
+check('and it does not say who can, or how to become them',
+  await (async () => {
+    const msg = (await refused(() => cancelWorkOrder(db, tech, {
+      workOrderId: jobOne.id, reason: 'Not going.',
+    }))) ?? '';
+    return !/manager|admin|assign|office|staff/i.test(msg);
+  })());
+
+// THE regression. Every counter account defaults to 'staff' - auth.ts and
+// user-cli.ts both - so a predicate "tightened" to admin || manager would 403
+// the entire office and nobody would find out until somebody tried to book a
+// pool opening in April. These three checks are what make that fail here
+// instead.
+const counterBooking = await refused(() => createWorkOrder(db, staff, {
+  customerId: created.id, propertyId: mainHouse.id,
+  type: 'water_test', summary: 'Booked at the counter',
+}));
+check('somebody behind the counter can book a job - staff is the office default',
+  counterBooking === null, counterBooking ?? '');
+
+// Booked by the manager rather than reusing the row above, so that if the
+// predicate is the thing that regressed these two still run and still name what
+// broke, instead of the suite dying on an uncaught refusal.
+const counterJob = await createWorkOrder(db, manager, {
+  customerId: created.id, propertyId: mainHouse.id,
+  type: 'water_test', summary: 'For the counter to move and call off',
+});
+
+check('and can move it',
+  (await refused(() => rescheduleWorkOrder(db, staff, {
+    workOrderId: counterJob.id, scheduledDate: '2026-05-11',
+  }))) === null);
+
+check('and can call it off',
+  (await refused(() => cancelWorkOrder(db, staff, {
+    workOrderId: counterJob.id, reason: 'Customer rebooked.',
+  }))) === null);
+
+// Self-assignment splits field from office, not senior from junior. In a
+// ten-person shop the manager sometimes drives the delivery, which is why
+// getTechnicians() deliberately returns every active user - so the office
+// putting its own name on a job is ordinary. A technician doing it is the hole.
+check('an office user may assign a job to themselves',
+  (await refused(() => createWorkOrder(db, staff, {
+    customerId: created.id, propertyId: mainHouse.id,
+    type: 'service', summary: 'Running this one myself',
+    assignedUserId: staff.userId,
+  }))) === null);
+
+check('a technician may not assign a job to themselves',
+  (await refused(() => createWorkOrder(db, tech, {
+    customerId: created.id, propertyId: mainHouse.id,
+    type: 'service', summary: 'Self-assigned',
+    assignedUserId: tech.userId,
+  })))?.includes('permission to schedule work') === true);
+
+check('nor hand themselves an existing one by rescheduling it',
+  (await refused(() => rescheduleWorkOrder(db, tech, {
+    workOrderId: jobOne.id, assignedUserId: tech.userId,
+  })))?.includes('permission to schedule work') === true);
+
+check('and none of that touched the job',
+  rows<{ assigned_user_id: string | null }>(await db.execute(sql`
+    SELECT assigned_user_id FROM work_order WHERE id = ${jobOne.id}::uuid
+  `))[0]!.assigned_user_id === staff.userId);
 
 const moved = await rescheduleWorkOrder(db, manager, {
   workOrderId: jobOne.id,

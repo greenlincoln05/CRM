@@ -68,7 +68,9 @@ that house.
 
 ## Consequences
 
-**This is an accident control, not a boundary, and that must be said plainly.**
+**This was an accident control, not a boundary — closed by ADR 0010 on
+2026-08-19, which made scheduling an office-role write. The reasoning below is
+what motivated that change and is kept for the record.**
 Office pages are gated on session only: any signed-in user, including a
 technician, can open the schedule and assign a job to themselves, and the check
 then admits them correctly. Closing that means role-gating the office writes and
