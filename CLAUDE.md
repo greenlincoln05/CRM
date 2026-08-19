@@ -10,8 +10,10 @@ That single fact drives everything below.
 
 - `README.md` — what works and what does not, kept honest
 - `docs/adr/` — why things are the way they are. All accepted: `0001` strangler
-  fig, `0002` database, `0003` sensitive fields, `0004` hosting, `0005` key
-  custody, `0006` field app offline
+  fig, `0002` database, `0003` sensitive fields, `0004` mobile platform, `0005`
+  staff authentication, `0006` field app offline, `0007` hosting, `0008` key
+  custody. Note `0004` and `0006` reach different conclusions about the same
+  app — unresolved, see `STATE.md`
 - `docs/cloud-architecture.md` — the deployment picture the ADRs assume
 - `STATE.md` — where the work actually is right now
 - `SESSIONS.md` — the log of what happened, newest last
@@ -72,6 +74,12 @@ codes, access notes, photos, or PII — and name both when marking.
 Commit again and the marker goes stale, so an amend or one-more-small-fix re-arms
 the gate. That is the intent: commit 56bf5be lost three files to a push nobody
 checked, and the repo has been paying for it since.
+
+Two honest limits. The marker is an ordinary file, so any agent that can write
+files can clear the gate without a review — this stops the accident, not a
+determined bypass. And the hook only loads in a session that started with
+`.claude/settings.json` already present, so after adding or changing it, restart
+Claude Code in this directory before trusting the gate.
 
 ## Non-negotiables
 

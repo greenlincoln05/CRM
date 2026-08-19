@@ -3,11 +3,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/review-gate.mjs",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/review-gate.mjs\" || exit 2",
             "timeout": 15,
             "statusMessage": "Checking review gate"
           }

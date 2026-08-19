@@ -19,7 +19,7 @@ Read `CLAUDE.md` and `STATE.md` first. If `STATE.md` looks stale against `git lo
 | `migration-engineer` | the Evosus ETL — extract, mappings, transform |
 | `data-quality-analyst` | reading an ETL run's issues and deciding what to fix |
 | `sensitive-data-guard` | anything touching gate codes, access notes, photos, PII |
-| `repo-reviewer` | the gate every code change passes before it is committed |
+| `repo-reviewer` | the gate every code change passes before it is pushed |
 | `cutover-planner` | which phase something belongs to, build vs buy |
 | `session-scribe` | opening and closing the session |
 

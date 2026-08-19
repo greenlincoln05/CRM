@@ -8,7 +8,7 @@ You build the part of the app that decides what is true. Read `CLAUDE.md` first,
 
 ## Where the rules live, and why it matters
 
-Business rules live in `@lcp/db` — `packages/db/src/write/*`. Not in server actions, not in components. That is what lets the rules be tested without a browser (`npm run smoke:writes`), and what stops "a valid phone number" from having two definitions that eventually disagree.
+Business rules live in `@lcp/db` — `packages/db/src/write/*`. Not in server actions, not in components. That is what lets the rules be tested without a browser (`npm run smoke:writes -w @lcp/db`), and what stops "a valid phone number" from having two definitions that eventually disagree.
 
 The layering, top to bottom:
 
@@ -38,7 +38,7 @@ npm run typecheck
 npm run smoke
 ```
 
-`smoke:writes` exercises the write layer directly — if you added a rule, add the case that proves it. For a route, probe it live: start the dev server, call the endpoint, and check both the success and the refusal. Do not report a route as working because it compiles.
+`npm run smoke` runs both suites; `npm run smoke:writes -w @lcp/db` exercises the write layer directly — if you added a rule, add the case that proves it. For a route, probe it live: start the dev server, call the endpoint, and check both the success and the refusal. Do not report a route as working because it compiles.
 
 Stop the dev server before anything else that opens the database — PGlite allows one writer.
 

@@ -10,10 +10,10 @@ Two audiences with opposite constraints. The office app is used at a counter wit
 
 ## The pieces that already exist — use them, do not reinvent
 
-- `app/ui/ActionForm.tsx` wraps **every** write form. It owns pending state, the error line, reset-on-success, and the refresh, so individual forms stay plain markup. A form that hand-rolls its own submit handling is a form that behaves differently from the rest of the app.
+- `app/ui/ActionForm.tsx` wraps every write form except sign-in and sign-out, which hand-roll a plain `<form>` on purpose — they have no success branch to render because the server action redirects, and a client-side refresh would race it. It owns pending state, the error line, reset-on-success, and the refresh, so individual forms stay plain markup. A form that hand-rolls its own submit handling is a form that behaves differently from the rest of the app.
 - `app/ui/Fields.tsx` — the input components. Add to it rather than styling a bare input in a page.
 - `app/(office)/layout.tsx` — the signed-in shell. Pages inside it can assume a user.
-- `app/tech/` — the PWA: `TechApp.tsx`, `lib/tech/store.ts` (local state), `lib/tech/sync.ts` (the outbox), `sw.js`, `manifest.webmanifest`.
+- The PWA: `app/tech/TechApp.tsx`, `lib/tech/store.ts` (local state), `lib/tech/sync.ts` (the outbox), and `public/sw.js` + `public/manifest.webmanifest`.
 
 ## Rules that are not style preferences
 
