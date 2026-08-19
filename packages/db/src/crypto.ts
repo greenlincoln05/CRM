@@ -1,100 +1,134 @@
+/**
+ * Field-level encryption for the handful of columns that are the means of
+ * physical entry to customers' homes: gate codes and lockbox codes.
+ *
+ * ADR 0003. Encryption happens HERE, in the application, so the key never
+ * reaches Postgres as a query parameter and never lands in a query log. The
+ * database stores only ciphertext; a stolen backup is not a stolen set of
+ * house keys.
+ *
+ * NOTE — this file is a reconstruction (2026-08-18). The original was written
+ * for commit 56bf5be but never pushed, and no clone of it survives. The wire
+ * format below satisfies every surviving call site (the `v1:` prefix the demo
+ * asserts, null passthrough in the ETL, throw-on-bad-key in the reveal route),
+ * but ciphertext written by the ORIGINAL implementation is NOT guaranteed to
+ * decrypt under this one. Only synthetic demo data ever existed, so nothing of
+ * value is lost — re-run `npm run etl -- demo` to re-encrypt dev data.
+ *
+ * Wire format, version 1:
+ *
+ *   "v1:" + base64( iv[12] || ciphertext || gcmTag[16] )
+ *
+ * AES-256-GCM. A fresh random IV per value; the GCM tag means tampering with
+ * the ciphertext fails loudly at decrypt rather than yielding garbage.
+ */
 import {
-  createCipheriv, createDecipheriv, randomBytes, timingSafeEqual,
+  createCipheriv, createDecipheriv, randomBytes,
 } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { loadRepoEnv, repoRoot } from './env.js';
+
+const PREFIX = 'v1:';
+const IV_LEN = 12;
+const TAG_LEN = 16;
+
+let cachedKey: Buffer | null = null;
 
 /**
- * Field-level encryption for the columns that open customers' gates.
+ * Resolve the 32-byte field key.
  *
- * ADR 0003: this database holds the means of physical entry to several hundred
- * Vermont and New York homes. A stolen backup must not be a stolen set of keys.
- *
- * Encryption happens in the application, not in the database, so the key never
- * travels to Postgres as a query parameter and never lands in a query log. The
- * database only ever sees ciphertext.
- *
- * AES-256-GCM: authenticated, so a tampered value fails loudly instead of
- * decrypting to garbage. Format is base64 of iv(12) || tag(16) || ciphertext,
- * with a short version prefix so the scheme can be rotated later without
- * guessing what an old row was encrypted with.
+ * Order:
+ *   1. LCP_FIELD_KEY (base64, 32 bytes) — required whenever DATABASE_URL is
+ *      set, i.e. against any real Postgres. Production never falls through.
+ *   2. Dev fallback, PGlite only: a generated key persisted at
+ *      `.pgdata/dev-field-key`. The quick start ("clone, install, demo") has
+ *      to work with no .env, and the web dev server has to decrypt what the
+ *      demo pipeline encrypted in a different process — so the dev key must
+ *      be stable across processes, not ephemeral. Keeping it inside the
+ *      gitignored PGlite directory is acceptable ONLY because dev data is
+ *      synthetic; ADR 0005 governs custody of the real key.
  */
+function fieldKey(): Buffer {
+  if (cachedKey) return cachedKey;
+  loadRepoEnv();
 
-const VERSION = 'v1';
-const IV_BYTES = 12;
-const TAG_BYTES = 16;
-
-export class MissingFieldKeyError extends Error {
-  constructor() {
-    super(
-      'LCP_FIELD_KEY is not set, and this operation touches an encrypted field ' +
-      '(gate codes, access notes).\n\n' +
-      'Generate one:\n' +
-      '  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"\n\n' +
-      'Put it in .env as LCP_FIELD_KEY. Back it up somewhere that is NOT this ' +
-      'repository and NOT the database backup - if both are lost together, the ' +
-      'gate codes are unrecoverable.',
-    );
-    this.name = 'MissingFieldKeyError';
+  const fromEnv = process.env.LCP_FIELD_KEY;
+  if (fromEnv) {
+    const key = Buffer.from(fromEnv, 'base64');
+    if (key.length !== 32) {
+      throw new Error(
+        `LCP_FIELD_KEY must be 32 bytes of base64 (got ${key.length}). ` +
+        `Generate one: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`,
+      );
+    }
+    cachedKey = key;
+    return key;
   }
-}
 
-function getKey(): Buffer {
-  const raw = process.env.LCP_FIELD_KEY;
-  if (!raw) throw new MissingFieldKeyError();
-  const key = Buffer.from(raw, 'base64');
-  if (key.length !== 32) {
+  if (process.env.DATABASE_URL) {
     throw new Error(
-      `LCP_FIELD_KEY must decode to exactly 32 bytes, got ${key.length}. ` +
-      'Generate a fresh one with randomBytes(32).toString("base64").',
+      'LCP_FIELD_KEY is not set. It is required against a real database — ' +
+      'the dev-key fallback exists only for embedded PGlite. See .env.example.',
     );
   }
+
+  // Dev fallback: generate once, persist next to the dev database.
+  const dir = process.env.PGLITE_DIR ?? resolve(repoRoot(), '.pgdata');
+  const file = resolve(dir, 'dev-field-key');
+  if (existsSync(file)) {
+    // Validate BEFORE caching: a corrupt key must throw this helpful error on
+    // every call, not just the first one in a long-lived dev-server process.
+    const key = Buffer.from(readFileSync(file, 'utf8').trim(), 'base64');
+    if (key.length !== 32) {
+      throw new Error(`Corrupt dev field key at ${file}. Delete it and re-run the demo.`);
+    }
+    cachedKey = key;
+    return key;
+  }
+  mkdirSync(dir, { recursive: true });
+  const key = randomBytes(32);
+  writeFileSync(file, key.toString('base64') + '\n', { mode: 0o600 });
+  console.warn(`[crypto] no LCP_FIELD_KEY set — generated a DEV-ONLY key at ${file}`);
+  cachedKey = key;
   return key;
 }
 
-/** True when a key is configured, without throwing. For startup checks. */
-export function fieldKeyConfigured(): boolean {
-  try { getKey(); return true; } catch { return false; }
-}
-
-export function encryptField(plaintext: string | null | undefined): string | null {
-  if (plaintext === null || plaintext === undefined || plaintext === '') return null;
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv('aes-256-gcm', getKey(), iv);
-  const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  const packed = Buffer.concat([iv, cipher.getAuthTag(), enc]);
-  return `${VERSION}:${packed.toString('base64')}`;
-}
-
-export function decryptField(stored: string | null | undefined): string | null {
-  if (!stored) return null;
-
-  const sep = stored.indexOf(':');
-  const version = sep > 0 ? stored.slice(0, sep) : '';
-  if (version !== VERSION) {
-    throw new Error(`Unknown encrypted field version "${version}". Refusing to guess.`);
-  }
-
-  const packed = Buffer.from(stored.slice(sep + 1), 'base64');
-  if (packed.length < IV_BYTES + TAG_BYTES + 1) {
-    throw new Error('Encrypted field is truncated or corrupt.');
-  }
-
-  const iv = packed.subarray(0, IV_BYTES);
-  const tag = packed.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
-  const body = packed.subarray(IV_BYTES + TAG_BYTES);
-
-  const decipher = createDecipheriv('aes-256-gcm', getKey(), iv);
-  decipher.setAuthTag(tag);
-  // Throws if the ciphertext or tag was modified - that is the point.
-  return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+/**
+ * Encrypt one sensitive value. Null passes through as null, so callers can
+ * write `encryptField(cleanText(...))` without branching — most properties
+ * have no gate code, and "no code" must stay visibly distinct from "code we
+ * cannot read".
+ */
+export function encryptField(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const iv = randomBytes(IV_LEN);
+  const cipher = createCipheriv('aes-256-gcm', fieldKey(), iv);
+  const ct = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  const packed = Buffer.concat([iv, ct, cipher.getAuthTag()]);
+  return PREFIX + packed.toString('base64');
 }
 
 /**
- * Constant-time comparison, for any future case where a code is checked rather
- * than displayed. Kept here so nobody reaches for === on a secret.
+ * Decrypt one value produced by encryptField().
+ *
+ * Throws on the wrong key, a truncated value, or tampered ciphertext — all
+ * three mean something is genuinely wrong, and the reveal route turns the
+ * throw into a clear "check LCP_FIELD_KEY" rather than an empty box.
  */
-export function secretEquals(a: string, b: string): boolean {
-  const ab = Buffer.from(a, 'utf8');
-  const bb = Buffer.from(b, 'utf8');
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
+export function decryptField(enc: string | null | undefined): string | null {
+  if (enc === null || enc === undefined || enc === '') return null;
+  if (!enc.startsWith(PREFIX)) {
+    throw new Error(`Unrecognized ciphertext format (expected "${PREFIX}" prefix)`);
+  }
+  const packed = Buffer.from(enc.slice(PREFIX.length), 'base64');
+  if (packed.length < IV_LEN + TAG_LEN + 1) {
+    throw new Error('Ciphertext too short to contain iv + data + tag');
+  }
+  const iv = packed.subarray(0, IV_LEN);
+  const tag = packed.subarray(packed.length - TAG_LEN);
+  const ct = packed.subarray(IV_LEN, packed.length - TAG_LEN);
+  const decipher = createDecipheriv('aes-256-gcm', fieldKey(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
 }

@@ -43,13 +43,30 @@ an attacker.
 Points 4-5 remain open, and point 5 becomes urgent the moment photo capture
 ships.
 
-Still open, and both blocking before real technicians use this:
-- **Authentication.** The reveal endpoint currently logs `unauthenticated-dev`.
-  It must reject anonymous callers and record a real user id. The log table is
-  already shaped for it.
+Authentication closed 2026-08-18 (ADR 0004 accepted, Clerk): every data
+surface — the pages, the search API, and the reveal endpoint — resolves a real
+`app_user` server-side before touching data, and the reveal records `user_id`
+in the log. Development on the embedded database runs as an auto-provisioned
+dev identity (never in production builds); a deployment with `DATABASE_URL`
+set and missing or half-configured Clerk keys rejects all of these surfaces —
+it fails closed instead of becoming a decrypt oracle or an open customer
+browser. The Clerk path itself is written but unexercised until an instance
+exists and keys are issued.
+
+Two conditions of that model, decided here:
+- **The Clerk instance must be invite-only** (public sign-ups disabled).
+  First sign-in auto-provisions an active staff account, and any active
+  account can reveal any gate code — so "can sign in" must mean "works here."
+- **The reveal is deliberately role-agnostic today.** Any active user, any
+  role, any property, every reveal logged. With ~30 invited employees the
+  audit trail is the control; per-job scoping (point 1's "assigned job"
+  wording) arrives with dispatch in Phase 2, when jobs exist to scope to.
+
+Still open, and blocking before real technicians use this:
 - **Key custody.** `LCP_FIELD_KEY` must be backed up somewhere that is neither
   this repository nor the database backup. Stored together, the encryption buys
-  nothing; lost together, the gate codes are unrecoverable.
+  nothing; lost together, the gate codes are unrecoverable. ADR 0005
+  (accepted) specifies the mechanism; it is not yet implemented.
 
 ## Consequences
 
