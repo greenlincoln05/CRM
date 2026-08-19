@@ -26,6 +26,7 @@ import {
   addProperty, updateProperty, setPropertyActive,
   addNote, setEventPinned, redactEvent, unredactEvent,
   recordWaterTest, flagReadings,
+  createWorkOrder, rescheduleWorkOrder, cancelWorkOrder, TASK_TEMPLATES,
   WriteError,
 } from './write/index.js';
 
@@ -70,7 +71,8 @@ for (const t of ['timeline_event', 'water_test']) {
 }
 await db.execute(sql`TRUNCATE customer, address, contact, property, property_equipment,
   app_user, app_session, sensitive_access_log, water_test, timeline_event,
-  import_batch, import_issue, legacy_row RESTART IDENTITY CASCADE`);
+  work_order, work_order_task, import_batch, import_issue, legacy_row
+  RESTART IDENTITY CASCADE`);
 for (const t of ['timeline_event', 'water_test']) {
   await db.execute(sql.raw(`ALTER TABLE ${t} ENABLE TRIGGER USER`));
 }
@@ -608,6 +610,158 @@ check('the advice attached to a reading can still be corrected',
 
 check('flagging is a pure function of the readings',
   flagReadings({ ph: '7.5' }).length === 0 && flagReadings({ ph: '8.4' })[0]?.direction === 'high');
+
+console.log('\n── Work orders ────────────────────────────────────────────\n');
+
+// A second household, so "that property belongs to somebody else" can be
+// asserted against a real property rather than a made-up uuid.
+const otherCustomer = await createCustomer(db, manager, {
+  lastName: 'Nadeau', firstName: 'Paul', phone: '8025557788',
+});
+const otherProperty = await addProperty(db, manager, otherCustomer.id, {
+  label: 'Lakeside camp', propertyType: 'pool',
+  address: { line1: '9 Marble Island Rd', city: 'Colchester', state: 'VT', postalCode: '05446' },
+});
+
+check('a job with an unknown status is refused',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, status: 'pencilled_in',
+  })))?.includes('status must be one of') === true);
+
+check('a job with an unknown type is refused',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, type: 'exorcism',
+  })))?.includes('type must be one of') === true);
+
+// Not a typo class of mistake: a truck rolling to a stranger's house, and a
+// customer whose timeline shows work at an address they have never heard of.
+check('a job cannot be booked at another customer’s property',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, propertyId: otherProperty.id, summary: 'Wrong house',
+  })))?.includes('does not belong to this customer') === true);
+
+check('a job cannot be assigned to a technician who does not exist',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, assignedUserId: '00000000-0000-4000-8000-000000000000',
+  })))?.includes('technician could not be found') === true);
+
+const jobOne = await createWorkOrder(db, manager, {
+  customerId: created.id,
+  propertyId: mainHouse.id,
+  type: 'opening',
+  priority: 'urgent',
+  scheduledDate: '2026-05-04',
+  scheduledWindow: '8:00 – 10:00',
+  estimatedMinutes: 90,
+  sequence: 1,
+  assignedUserId: tech.userId,
+  summary: 'Spring opening',
+  instructions: 'Look at the liner seam on the north side.',
+});
+
+const jobTwo = await createWorkOrder(db, manager, {
+  customerId: otherCustomer.id,
+  propertyId: otherProperty.id,
+  type: 'inspection',
+  scheduledDate: '2026-05-04',
+  summary: 'Cover fit check',
+});
+
+const numberOf = (n: string) => Number(n.replace(/^W-/, ''));
+check('two jobs booked in a row get distinct, sequential numbers',
+  /^W-\d+$/.test(jobOne.number) && /^W-\d+$/.test(jobTwo.number)
+  && numberOf(jobTwo.number) === numberOf(jobOne.number) + 1,
+  `${jobOne.number} then ${jobTwo.number}`);
+
+// A job with no tasks renders an empty checklist on the technician's phone,
+// which is how a step gets skipped in April by somebody hired in March.
+const openingTasks = rows<{ label: string; sequence: number; done: boolean }>(
+  await db.execute(sql`
+    SELECT label, sequence, done FROM work_order_task
+     WHERE work_order_id = ${jobOne.id}::uuid ORDER BY sequence
+  `),
+);
+check('creating a job seeds the checklist its type always covers',
+  openingTasks.length === TASK_TEMPLATES.opening.length
+  && openingTasks[0]!.label === TASK_TEMPLATES.opening[0]
+  && openingTasks.every((t) => t.done === false),
+  `${openingTasks.length} task(s)`);
+
+check('the checklist matches the job type, not the last job type',
+  rows(await db.execute(sql`
+    SELECT 1 FROM work_order_task WHERE work_order_id = ${jobTwo.id}::uuid
+  `)).length === TASK_TEMPLATES.inspection.length);
+
+check('booking a job says so on the customer’s timeline',
+  rows(await db.execute(sql`
+    SELECT 1 FROM timeline_event
+     WHERE ref_type = 'work_order' AND ref_id = ${jobOne.id}
+       AND title LIKE ${`Job ${jobOne.number} scheduled%`}
+  `)).length === 1);
+
+const moved = await rescheduleWorkOrder(db, manager, {
+  workOrderId: jobOne.id,
+  scheduledDate: '2026-05-06',
+  scheduledWindow: '1:00 – 3:00',
+  assignedUserId: manager.userId,
+  sequence: 2,
+});
+
+check('rescheduling records what actually moved',
+  moved.changes.length === 4
+  && moved.changes.some((c) => c.startsWith('Date changed from'))
+  && moved.changes.some((c) => c.startsWith('Assigned to changed from')),
+  moved.changes.join(' | '));
+
+check('rescheduling appends a timeline event describing the change',
+  rows<{ body: string }>(await db.execute(sql`
+    SELECT body FROM timeline_event
+     WHERE ref_type = 'work_order' AND ref_id = ${jobOne.id}
+       AND title LIKE '%rescheduled%'
+  `))[0]?.body.includes('2026-05-06') === true);
+
+check('the move actually landed on the job',
+  rows<{ scheduled_date: string; sequence: number }>(await db.execute(sql`
+    SELECT scheduled_date::text, sequence FROM work_order WHERE id = ${jobOne.id}::uuid
+  `))[0]!.scheduled_date === '2026-05-06');
+
+const restated = await rescheduleWorkOrder(db, manager, {
+  workOrderId: jobOne.id,
+  scheduledDate: '2026-05-06',
+  scheduledWindow: '1:00 – 3:00',
+  assignedUserId: manager.userId,
+  sequence: 2,
+});
+check('re-saving the same schedule does not litter the timeline',
+  restated.changes.length === 0);
+
+check('cancelling without a reason is refused',
+  (await refused(() => cancelWorkOrder(db, manager, {
+    workOrderId: jobTwo.id, reason: '   ',
+  })))?.includes('reason for cancelling') === true);
+
+await cancelWorkOrder(db, manager, {
+  workOrderId: jobTwo.id, reason: 'Customer sold the house.',
+});
+check('cancelling sets the status and says why on the timeline',
+  rows<{ status: string }>(await db.execute(sql`
+    SELECT status FROM work_order WHERE id = ${jobTwo.id}::uuid
+  `))[0]!.status === 'cancelled'
+  && rows<{ body: string }>(await db.execute(sql`
+    SELECT body FROM timeline_event
+     WHERE ref_type = 'work_order' AND ref_id = ${jobTwo.id} AND title LIKE '%cancelled%'
+  `))[0]?.body.includes('Customer sold the house.') === true);
+
+check('a cancelled job cannot be quietly rescheduled back onto the board',
+  (await refused(() => rescheduleWorkOrder(db, manager, {
+    workOrderId: jobTwo.id, scheduledDate: '2026-05-07',
+  })))?.includes('cancelled and cannot be rescheduled') === true);
+
+check('the database refuses two jobs claiming the same number',
+  (await refused(() => db.execute(sql`
+    INSERT INTO work_order (number, customer_id, legacy_source)
+    VALUES (${jobOne.number}, ${created.id}::uuid, 'manual')
+  `)))?.includes('work_order_number_unique_idx') === true);
 
 console.log('\n── Every write carries a name ─────────────────────────────\n');
 

@@ -15,7 +15,7 @@ edit records, so everything written from the app carries a name.
 | Append-only timeline | working, enforced in the database |
 | Evosus schema discovery | written, needs a real server to run against |
 | Legacy extract (SQL Server + CSV) | written, CSV path tested |
-| Legacy transform + data quality reporting | working, 41 checks passing |
+| Legacy transform + data quality reporting | working, 42 checks passing |
 | Web app (search, customer detail, timeline) | working |
 | Staff sign-in, sessions, actor on every write | working, tested |
 | Creating and editing customers, contacts, properties | working, tested |
@@ -74,7 +74,7 @@ system does.
 ```
 packages/db     schema, migrations, database client
 packages/etl    Evosus discovery, extraction, transform, data quality reports
-apps/           web and mobile (not yet started)
+apps/web        office app and the technician PWA
 docs/adr/       why things are the way they are
 ```
 

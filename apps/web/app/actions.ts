@@ -9,6 +9,7 @@ import {
   addProperty, updateProperty, setPropertyActive,
   addNote, setEventPinned, redactEvent, unredactEvent,
   recordWaterTest,
+  createWorkOrder, rescheduleWorkOrder, cancelWorkOrder,
   type Actor,
 } from '@lcp/db';
 import { getDb } from '@/lib/db';
@@ -290,5 +291,58 @@ export async function recordWaterTestAction(_prev: FormState, fd: FormData): Pro
     temperatureF: str(fd, 'temperatureF'),
     recommendation: str(fd, 'recommendation'),
     notes: str(fd, 'notes'),
+  }));
+}
+
+// ── Work orders ────────────────────────────────────────────────────────────
+
+/**
+ * A job shows up in two places, so both get revalidated: the customer's record,
+ * where it sits beside their history, and the day board the office dispatches
+ * from. `/schedule` has no route yet - revalidating a path nothing renders is a
+ * no-op, and naming it now is cheaper than remembering to come back for it.
+ */
+const jobPaths = (customerId: string) => [`/customers/${customerId}`, '/schedule'];
+
+/**
+ * Nothing is checked here on purpose - not the type, not the date, not whether
+ * the property belongs to the customer. All of it is in createWorkOrder, where
+ * the seed fixture and anything Sprint 4 dispatch builds get it too, and where
+ * it is tested without a browser.
+ */
+export async function createWorkOrderAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const customerId = String(fd.get('customerId') ?? '');
+  return run(jobPaths(customerId), (db, actor) => createWorkOrder(db, actor, {
+    customerId,
+    propertyId: str(fd, 'propertyId'),
+    type: str(fd, 'type'),
+    status: str(fd, 'status'),
+    priority: str(fd, 'priority'),
+    scheduledDate: str(fd, 'scheduledDate'),
+    scheduledWindow: str(fd, 'scheduledWindow'),
+    estimatedMinutes: str(fd, 'estimatedMinutes'),
+    sequence: str(fd, 'sequence'),
+    assignedUserId: str(fd, 'assignedUserId'),
+    summary: str(fd, 'summary'),
+    instructions: str(fd, 'instructions'),
+  }));
+}
+
+export async function rescheduleWorkOrderAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const customerId = String(fd.get('customerId') ?? '');
+  return run(jobPaths(customerId), (db, actor) => rescheduleWorkOrder(db, actor, {
+    workOrderId: String(fd.get('workOrderId') ?? ''),
+    scheduledDate: str(fd, 'scheduledDate'),
+    scheduledWindow: str(fd, 'scheduledWindow'),
+    assignedUserId: str(fd, 'assignedUserId'),
+    sequence: str(fd, 'sequence'),
+  }));
+}
+
+export async function cancelWorkOrderAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  const customerId = String(fd.get('customerId') ?? '');
+  return run(jobPaths(customerId), (db, actor) => cancelWorkOrder(db, actor, {
+    workOrderId: String(fd.get('workOrderId') ?? ''),
+    reason: String(fd.get('reason') ?? ''),
   }));
 }

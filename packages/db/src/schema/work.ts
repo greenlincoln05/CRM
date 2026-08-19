@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, boolean, timestamp, integer, date, numeric, jsonb, index,
+  pgTable, uuid, text, boolean, timestamp, integer, date, numeric, jsonb,
+  index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { provenance, timestamps } from './_shared.js';
 import { customer, property } from './customer.js';
@@ -17,7 +18,15 @@ import { appUser } from './timeline.js';
 export const workOrder = pgTable('work_order', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
 
-  /** Human-readable, what people say out loud. "Job 4417." */
+  /**
+   * Human-readable, what people say out loud. "Job 4417."
+   *
+   * Allocated from `work_order_number_seq` (migration 0010) rather than
+   * counted in application code, because two people creating a job at the
+   * same time from two terminals both read the same MAX() and both write the
+   * same number. Nullable because legacy jobs arrive already numbered by
+   * Evosus, and a job created before the sequence existed has none.
+   */
   number: text('number'),
 
   customerId: uuid('customer_id').notNull().references(() => customer.id, { onDelete: 'cascade' }),
@@ -62,6 +71,21 @@ export const workOrder = pgTable('work_order', {
   index('work_order_date_status_idx').on(t.scheduledDate, t.status),
   index('work_order_customer_idx').on(t.customerId),
   index('work_order_property_idx').on(t.propertyId),
+
+  // A job number is how the office and the tech refer to the same visit on the
+  // phone. Two jobs sharing one is the counter pulling up the wrong truck roll.
+  // Partial, because most jobs predate the sequence and carry no number.
+  uniqueIndex('work_order_number_unique_idx')
+    .on(t.number)
+    .where(sql`number IS NOT NULL`),
+
+  // Non-negotiable #2: the ETL upserts on (legacy_source, legacy_id), and an
+  // upsert needs an inferable ON CONFLICT target. Without this index every
+  // re-run of a jobs import inserts the business a second time. Same shape as
+  // contact/property/address in migration 0001.
+  uniqueIndex('work_order_legacy_key_idx')
+    .on(t.legacySource, t.legacyId)
+    .where(sql`legacy_id IS NOT NULL`),
 ]);
 
 /**

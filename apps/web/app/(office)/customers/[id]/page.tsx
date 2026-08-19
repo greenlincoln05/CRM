@@ -2,18 +2,24 @@ import { notFound } from 'next/navigation';
 import GateCode from '../../../GateCode';
 import ActionForm from '../../../ui/ActionForm';
 import {
-  Check, ContactFields, CustomerFields, Field, GateCodeField,
-  PropertyFields, Select, TextArea,
+  Check, ContactFields, CustomerFields, Field, GateCodeField, JobFields,
+  PropertyFields, ScheduleFields, Select, TextArea,
 } from '../../../ui/Fields';
 import {
-  addContactAction, addNoteAction, addPropertyAction, recordWaterTestAction,
-  redactEventAction, removeContactAction, setPropertyActiveAction, togglePinAction,
+  addContactAction, addNoteAction, addPropertyAction, cancelWorkOrderAction,
+  createWorkOrderAction, recordWaterTestAction,
+  redactEventAction, removeContactAction, rescheduleWorkOrderAction,
+  setPropertyActiveAction, togglePinAction,
   unredactEventAction, updateContactAction, updateCustomerAction, updatePropertyAction,
 } from '../../../actions';
 import {
-  getCustomer, getProperties, getContacts, getTimeline, getWaterTests,
+  getCustomer, getProperties, getContacts, getTechnicians, getTimeline,
+  getWaterTests, getWorkOrders,
   type PropertyRow,
 } from '@/lib/queries';
+import {
+  fmtDay, jobIsOpen, jobStatusClass, jobStatusLabel, jobTypeLabel,
+} from '@/lib/jobs';
 import { canRedact, requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -80,8 +86,9 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   const customer = await getCustomer(id).catch(() => null);
   if (!customer) notFound();
 
-  const [properties, contacts, timeline, waterTests] = await Promise.all([
+  const [properties, contacts, timeline, waterTests, jobs, technicians] = await Promise.all([
     getProperties(id), getContacts(id), getTimeline(id), getWaterTests(id),
+    getWorkOrders(id), getTechnicians(),
   ]);
 
   // Only live properties are offered as the subject of a new note or test.
@@ -361,6 +368,87 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
             </details>
           </div>
         </div>
+      </div>
+
+      {/* ── Jobs ──────────────────────────────────────────────────────── */}
+      {/* Above the timeline, below everything describing the account: what is
+          booked is a question about next week, and the feed is a question about
+          what already happened. */}
+      <div className="card">
+        <h3>Jobs ({jobs.length})</h3>
+        {jobs.length === 0 && <p className="empty" style={{ padding: 0 }}>None on the books.</p>}
+
+        {jobs.map((j) => {
+          const open = jobIsOpen(j.status);
+          return (
+            <div className="prop" key={j.id}>
+              <div className="label">
+                {j.number && <span className="jobno">{j.number}</span>}{' '}
+                {j.summary ?? jobTypeLabel(j.type)}
+                <span className={jobStatusClass(j.status)} style={{ marginLeft: 8 }}>
+                  {jobStatusLabel(j.status)}
+                </span>
+                {j.priority === 'urgent' && (
+                  <span className="badge bad" style={{ marginLeft: 6 }}>urgent</span>
+                )}
+              </div>
+
+              <div className="addr">
+                {[
+                  fmtDay(j.scheduled_date) ?? 'Unscheduled',
+                  j.scheduled_window,
+                  j.assignee ?? 'Unassigned',
+                  jobTypeLabel(j.type),
+                  j.property_label,
+                  j.task_count > 0 ? `${j.tasks_done}/${j.task_count} steps` : null,
+                ].filter(Boolean).join('  ·  ')}
+              </div>
+
+              {j.instructions && <div className="note"><b>Office</b> · {j.instructions}</div>}
+              {j.work_performed && <div className="note"><b>Performed</b> · {j.work_performed}</div>}
+              {/* Written by the technician's phone. It is the thing that
+                  generates the next job, so it is not buried. */}
+              {j.incomplete_reason && (
+                <div className="flag"><b>Left unfinished</b> · {j.incomplete_reason}</div>
+              )}
+
+              {open && (
+                <details className="panel">
+                  <summary>Reschedule or cancel</summary>
+                  {/* Pre-filled from the row on purpose: rescheduleWorkOrder
+                      writes all four columns from what it is given, so a blank
+                      field here clears what is on file rather than leaving it. */}
+                  <ActionForm action={rescheduleWorkOrderAction} submitLabel="Save the change">
+                    <input type="hidden" name="customerId" value={customer.id} />
+                    <input type="hidden" name="workOrderId" value={j.id} />
+                    <ScheduleFields w={j} technicians={technicians} />
+                  </ActionForm>
+
+                  <ActionForm
+                    action={cancelWorkOrderAction}
+                    submitLabel="Call this job off"
+                    destructive
+                    compact
+                    confirm="Cancel this job? The reason goes on the timeline."
+                  >
+                    <input type="hidden" name="customerId" value={customer.id} />
+                    <input type="hidden" name="workOrderId" value={j.id} />
+                    <Field label="Reason" name="reason" required
+                      placeholder="Customer rescheduled for the following week." />
+                  </ActionForm>
+                </details>
+              )}
+            </div>
+          );
+        })}
+
+        <details className="panel">
+          <summary>Schedule a job</summary>
+          <ActionForm action={createWorkOrderAction} submitLabel="Schedule job" resetOnSuccess>
+            <input type="hidden" name="customerId" value={customer.id} />
+            <JobFields propertyOptions={propertyOptions} technicians={technicians} />
+          </ActionForm>
+        </details>
       </div>
 
       {/* ── The feed ──────────────────────────────────────────────────── */}

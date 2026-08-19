@@ -18,9 +18,10 @@ export default async function OfficeLayout({ children }: { children: React.React
     <div className="shell">
       <div className="topbar">
         <h1>Lake Champlain Pools, Spas &amp; Stoves</h1>
-        <span className="sub">Phase 1 &middot; customers</span>
+        <span className="sub">Phase 2 &middot; service &amp; dispatch</span>
 
         <div className="who-bar">
+          <a className="sub" href="/schedule">Schedule →</a>
           <a className="sub" href="/tech">Technician app →</a>
           {user && (
             <>

@@ -59,6 +59,9 @@ a { color: inherit; text-decoration: none; }
   display: flex; align-items: baseline; gap: 12px;
   padding-bottom: 18px; margin-bottom: 18px;
   border-bottom: 1px solid var(--border);
+  /* Wraps rather than pushing the page sideways. One row on the counter
+     machine; the nav drops to a second line on anything narrow. */
+  flex-wrap: wrap;
 }
 .topbar h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
 .topbar .sub { color: var(--text-dim); font-size: 13px; }
@@ -201,7 +204,7 @@ a { color: inherit; text-decoration: none; }
  * and it all still works if the JavaScript has not arrived yet.
  */
 
-.who-bar { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.who-bar { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .whoami {
   font-size: 13px; color: var(--text-dim);
   display: inline-flex; align-items: center; gap: 6px;
@@ -320,3 +323,59 @@ button.primary:disabled, button.danger:disabled { opacity: .55; cursor: default;
 
 .kind.system { background: var(--surface-2); color: var(--text-dim); }
 .kind.water_test { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+/* ── the day board (Phase 2) ────────────────────────────────────────── */
+
+/*
+ * Dispatch looks at this while somebody is on the phone asking when the truck
+ * is coming, so it reads top to bottom in one pass: a technician per card,
+ * their stops in order, and the exceptions - urgent, unfinished, called off -
+ * loud enough to find without hunting.
+ *
+ * There is no gate code here and no control that reveals one. See the note at
+ * the top of app/(office)/schedule/page.tsx and ADR 0003.
+ */
+
+.dayctl { display: flex; align-items: flex-end; gap: 12px; }
+.dayctl .field { margin-bottom: 0; }
+.dayctl .field input { min-width: 190px; }
+
+.daynav { display: flex; gap: 16px; margin: 12px 2px 0; }
+.daynav a:hover { color: var(--accent); }
+
+.job {
+  display: grid; grid-template-columns: 26px 1fr; gap: 12px;
+  padding: 12px 0; border-top: 1px solid var(--border);
+}
+.job:first-of-type { border-top: none; padding-top: 0; }
+.job .seq {
+  color: var(--text-dim); font-size: 14px; text-align: right;
+  font-variant-numeric: tabular-nums; padding-top: 2px;
+}
+.job .label {
+  font-weight: 600; font-size: 16px;
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.job .label a:hover { color: var(--accent); }
+.job .addr { color: var(--text-dim); font-size: 14px; margin-top: 3px; }
+.job .note { font-size: 14px; margin-top: 8px; }
+.job .note b { color: var(--text-dim); font-weight: 600; }
+
+/* Finished and called-off work stays on the board and stops competing for
+   attention with the work still to be done. */
+.job.off .label { font-weight: 500; }
+.job.off .label a { color: var(--text-dim); }
+.job.urgent .seq { color: var(--danger); font-weight: 600; }
+
+.jobno { font-family: ui-monospace, monospace; font-size: 13px; color: var(--text-dim); }
+
+.badge.bad { background: var(--warn-soft); border-color: var(--danger); color: var(--danger); }
+
+/* incomplete_reason, and anything else a person has to act on rather than
+   merely read. The phone writes it; this is where the office finally sees it. */
+.flag {
+  margin-top: 8px; font-size: 14px;
+  padding: 7px 10px; border-radius: 8px;
+  background: var(--warn-soft); border: 1px solid var(--warn); color: var(--warn);
+}
+.flag b { font-weight: 600; }

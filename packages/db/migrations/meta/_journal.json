@@ -71,6 +71,13 @@
       "when": 1787101230387,
       "tag": "0009_account_number_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787123652252,
+      "tag": "0010_work_order_numbering",
+      "breakpoints": true
     }
   ]
 }

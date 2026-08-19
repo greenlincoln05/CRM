@@ -5,9 +5,31 @@
  * true-shaped to render, and so the offline behaviour can be exercised against
  * a day that looks like a day: a spread of job types, one with no property
  * attached, one already finished, one urgent.
+ *
+ * Two things make it safe to run twice, which non-negotiable #2 requires of
+ * everything that writes:
+ *
+ *   - Every row carries `(legacy_source, legacy_id)` and upserts on that pair,
+ *     using the partial index from migration 0010. The predicate has to be
+ *     repeated in the ON CONFLICT clause for Postgres to infer a partial index
+ *     as the target - same shape as every upsert in transform.ts. Before that,
+ *     a bare `ON CONFLICT DO NOTHING` was deduping by accident through the
+ *     hardcoded W-100n job numbers, which is not a key and never was.
+ *
+ *   - Job numbers come from `work_order_number_seq` through the same allocator
+ *     the write layer uses, so a seeded job cannot collide with one the office
+ *     created. The pre-flight lookup means a re-run does not burn four numbers
+ *     to insert nothing.
+ *
+ * The checklists come from TASK_TEMPLATES in the write layer rather than being
+ * written out again here: the fixture should exercise the same seeding the
+ * office gets, or it stops being evidence of anything.
  */
 import { sql as dsql } from 'drizzle-orm';
-import { createDb } from '@lcp/db';
+import { createDb, tasksForType } from '@lcp/db';
+
+/** Not 'evosus': these rows are ours, and the issue report should not count them. */
+const SOURCE = 'seed';
 
 export async function seedJobs() {
   const { db, close } = await createDb();
@@ -41,19 +63,25 @@ export async function seedJobs() {
     FROM property p WHERE p.legacy_source = 'evosus'`));
   const byLegacy = new Map(props.map((p: any) => [p.legacy_id, p]));
 
-  const plan = [
+  const plan: Array<{
+    legacy: string; seq: number; type: string; window: string; mins: number;
+    summary: string; instructions: string; status: string; priority: string;
+    /** Only where the type's own checklist would be the wrong one. */
+    tasks?: string[];
+  }> = [
     { legacy: 'S-001', seq: 1, type: 'opening',   window: '8:00 – 10:00',  mins: 90,
       summary: 'Spring opening',
       instructions: 'Customer asked us to look at the liner seam on the north side while we are there. Do not promise a repair date.',
-      tasks: ['Remove and fold winter cover', 'Reinstall skimmer baskets', 'Start pump, check for leaks', 'Balance water', 'Photograph liner seam'],
       status: 'scheduled', priority: 'normal' },
 
     { legacy: 'S-003', seq: 2, type: 'service',   window: '10:30 – 12:00', mins: 60,
       summary: 'Weekly commercial service',
       instructions: 'Check in at the front desk before going to the pump house. Invoice goes to AP, not the property.',
-      tasks: ['Test and balance water', 'Check chlorine feeder', 'Backwash filter', 'Log readings for the health inspector'],
       status: 'scheduled', priority: 'normal' },
 
+    // Filed as a service call because there is no stove job type, which is why
+    // the generic service checklist would send a technician looking for a
+    // filter to backwash in somebody's basement.
     { legacy: 'S-005', seq: 3, type: 'service',   window: 'after 1:00',    mins: 75,
       summary: 'Annual pellet stove cleaning',
       instructions: 'Stove is in the finished basement, use the bulkhead. Harman P43 installed 2019.',
@@ -63,7 +91,6 @@ export async function seedJobs() {
     { legacy: 'S-002', seq: 4, type: 'inspection', window: 'if time',      mins: 30,
       summary: 'Spa cover fit check',
       instructions: 'Steep driveway. Do not bring the big truck in mud season.',
-      tasks: ['Measure cover', 'Photograph cabinet corners'],
       status: 'scheduled', priority: 'low' },
   ];
 
@@ -72,21 +99,35 @@ export async function seedJobs() {
     const p: any = byLegacy.get(job.legacy);
     if (!p) continue;
 
+    // Stable across runs and across however the uuids come out, which is what
+    // makes the upsert below an upsert rather than a coincidence.
+    const legacyId = `JOB-${job.legacy}`;
+
+    // Pre-flight, so a second run does not consume four job numbers to insert
+    // nothing. The index is still the guarantee; this is only politeness.
+    const already = rows(await db.execute(dsql`
+      SELECT id FROM work_order
+       WHERE legacy_source = ${SOURCE} AND legacy_id = ${legacyId}`))[0];
+    if (already) continue;
+
     const wo = rows(await db.execute(dsql`
       INSERT INTO work_order (number, customer_id, property_id, type, status, priority,
                               scheduled_date, scheduled_window, estimated_minutes, sequence,
-                              assigned_user_id, summary, instructions)
-      VALUES (${`W-${1000 + job.seq}`}, ${p.customer_id}, ${p.id}, ${job.type}, ${job.status},
+                              assigned_user_id, summary, instructions,
+                              legacy_source, legacy_id)
+      VALUES ('W-' || nextval('work_order_number_seq'),
+              ${p.customer_id}, ${p.id}, ${job.type}, ${job.status},
               ${job.priority}, CURRENT_DATE, ${job.window}, ${job.mins}, ${job.seq},
-              ${mike.id}, ${job.summary}, ${job.instructions})
-      ON CONFLICT DO NOTHING
+              ${mike.id}, ${job.summary}, ${job.instructions},
+              ${SOURCE}, ${legacyId})
+      ON CONFLICT (legacy_source, legacy_id) WHERE legacy_id IS NOT NULL DO NOTHING
       RETURNING id`))[0];
 
     if (!wo) continue;
     n++;
 
     let i = 0;
-    for (const label of job.tasks) {
+    for (const label of job.tasks ?? tasksForType(job.type)) {
       await db.execute(dsql`
         INSERT INTO work_order_task (work_order_id, sequence, label)
         VALUES (${wo.id}, ${i++}, ${label})`);

@@ -1,4 +1,7 @@
-import type { ContactRow, CustomerDetail, PropertyRow } from '@/lib/queries';
+import type {
+  ContactRow, CustomerDetail, PropertyRow, TechnicianRow, WorkOrderRow,
+} from '@/lib/queries';
+import { JOB_PRIORITIES, JOB_TYPES } from '@/lib/jobs';
 
 /**
  * The field sets, shared between the "add" and "edit" versions of each form.
@@ -10,6 +13,7 @@ import type { ContactRow, CustomerDetail, PropertyRow } from '@/lib/queries';
 
 export function Field({
   label, name, defaultValue, type = 'text', placeholder, required, hint, autoFocus,
+  inputMode,
 }: {
   label: string;
   name: string;
@@ -19,6 +23,8 @@ export function Field({
   required?: boolean;
   hint?: string;
   autoFocus?: boolean;
+  /** Which keyboard a phone offers. Shape and affordance, never a rule. */
+  inputMode?: 'text' | 'numeric' | 'tel' | 'email' | 'decimal';
 }) {
   return (
     <label className="field">
@@ -30,6 +36,7 @@ export function Field({
         placeholder={placeholder}
         required={required}
         autoFocus={autoFocus}
+        inputMode={inputMode}
         autoComplete="off"
         spellCheck={false}
       />
@@ -249,6 +256,89 @@ export function PropertyFields({ p, includeGateCode }: {
       </fieldset>
 
       <Check label="Primary property" name="isPrimary" defaultChecked={p?.is_primary} />
+    </>
+  );
+}
+
+/* ── Work orders ─────────────────────────────────────────────────────── */
+
+/** The picker of who is going. Roles other than tech are named as such. */
+function technicianOptions(
+  technicians: readonly TechnicianRow[],
+): readonly (readonly [string, string])[] {
+  return technicians.map((t) => [
+    t.id,
+    t.role === 'tech' ? t.display_name : `${t.display_name} (${t.role})`,
+  ] as const);
+}
+
+/**
+ * When, how long, who, and where in the day - the four things dispatch moves.
+ *
+ * Shared between booking a job and moving one, and on the moving side every
+ * field has to be pre-filled from the row. rescheduleWorkOrder writes all four
+ * columns from what it is given rather than merging, so a form that omitted the
+ * window would silently clear it. Pass `w` and they all come back populated.
+ */
+export function ScheduleFields({ w, technicians }: {
+  w?: Pick<WorkOrderRow,
+    'scheduled_date' | 'scheduled_window' | 'sequence' | 'assigned_user_id'>;
+  technicians: readonly TechnicianRow[];
+}) {
+  return (
+    <>
+      <div className="row3">
+        <Field label="Date" name="scheduledDate" type="date"
+          defaultValue={w?.scheduled_date}
+          hint="Leave blank to park it unscheduled." />
+        <Field label="Arrival window" name="scheduledWindow"
+          defaultValue={w?.scheduled_window} placeholder="8:00 – 10:00" />
+        <Field label="Stop on the day" name="sequence" inputMode="numeric"
+          defaultValue={w?.sequence == null ? '' : String(w.sequence)}
+          hint="1 is the first call of the day." />
+      </div>
+
+      <Select
+        label="Technician" name="assignedUserId"
+        defaultValue={w?.assigned_user_id} includeBlank="Unassigned"
+        options={technicianOptions(technicians)}
+      />
+    </>
+  );
+}
+
+/**
+ * Booking a job.
+ *
+ * No status field: a job being booked is scheduled, and the statuses after that
+ * one are things the technician's phone reports having done, not things the
+ * counter picks from a list.
+ */
+export function JobFields({ propertyOptions, technicians }: {
+  propertyOptions: readonly (readonly [string, string])[];
+  technicians: readonly TechnicianRow[];
+}) {
+  return (
+    <>
+      <div className="row3">
+        <Select label="Type" name="type" defaultValue="service" options={JOB_TYPES} />
+        <Select label="Priority" name="priority" defaultValue="normal" options={JOB_PRIORITIES} />
+        <Select
+          label="Property" name="propertyId" includeBlank="Whole account"
+          options={propertyOptions}
+        />
+      </div>
+
+      <Field label="Summary" name="summary" placeholder="Spring opening"
+        hint="What the technician sees first on the phone." />
+
+      <ScheduleFields technicians={technicians} />
+
+      <Field label="Estimated time (minutes)" name="estimatedMinutes" inputMode="numeric"
+        placeholder="90" />
+
+      <TextArea label="Instructions" name="instructions" rows={2}
+        placeholder="Check in at the front desk before going to the pump house." />
     </>
   );
 }

@@ -13,3 +13,4 @@ export * from './contacts.js';
 export * from './properties.js';
 export * from './timeline.js';
 export * from './waterTests.js';
+export * from './workOrders.js';
