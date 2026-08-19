@@ -1,7 +1,7 @@
 # 0006 — The technician app works without a network
 
-Status: proposed
-Date: 2026-08-18
+Status: accepted
+Date: 2026-08-18 (proposed), 2026-08-18 (accepted)
 
 ## Context
 

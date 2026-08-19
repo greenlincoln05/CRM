@@ -1,7 +1,7 @@
 # 0005 — Custody of the field encryption key
 
-Status: proposed
-Date: 2026-08-18
+Status: accepted
+Date: 2026-08-18 (proposed), 2026-08-18 (accepted)
 
 ## Context
 

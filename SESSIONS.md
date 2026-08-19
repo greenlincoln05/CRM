@@ -135,3 +135,10 @@ unexercised — no instance exists yet.
 **Next.** Create the invite-only Clerk instance and exercise the auth path end
 to end; decide ADR 0005 (`LCP_FIELD_KEY` custody); run discovery against real
 Evosus.
+
+**Decided (2026-08-18, later).** ADRs 0005 (key custody: KMS-wrapped
+`LCP_FIELD_KEY`, sealed offline copy) and 0006 (offline-first Expo technician
+app with an outbox) accepted. Decisions only — nothing implemented: the KMS
+unwrap does not exist in code, the offline copy has not been made, the mobile
+app is not started. All six ADRs are now accepted; CLAUDE.md and cross-
+references updated to match.

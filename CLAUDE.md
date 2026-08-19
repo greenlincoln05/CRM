@@ -9,10 +9,10 @@ That single fact drives everything below.
 ## Read first
 
 - `README.md` — what works and what does not, kept honest
-- `docs/adr/` — why things are the way they are. Accepted: `0001` strangler fig,
-  `0002` database, `0003` sensitive fields. Proposed and not yet decided: `0004`
-  hosting, `0005` key custody, `0006` field app offline
-- `docs/cloud-architecture.md` — the deployment picture the proposed ADRs assume
+- `docs/adr/` — why things are the way they are. All accepted: `0001` strangler
+  fig, `0002` database, `0003` sensitive fields, `0004` hosting, `0005` key
+  custody, `0006` field app offline
+- `docs/cloud-architecture.md` — the deployment picture the ADRs assume
 - `STATE.md` — where the work actually is right now
 - `SESSIONS.md` — the log of what happened, newest last
 

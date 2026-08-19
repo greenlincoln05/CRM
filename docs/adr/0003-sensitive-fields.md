@@ -65,8 +65,8 @@ Two conditions of that model, decided here:
 Still open, and blocking before real technicians use this:
 - **Key custody.** `LCP_FIELD_KEY` must be backed up somewhere that is neither
   this repository nor the database backup. Stored together, the encryption buys
-  nothing; lost together, the gate codes are unrecoverable. ADR 0005 proposes
-  the mechanism.
+  nothing; lost together, the gate codes are unrecoverable. ADR 0005
+  (accepted) specifies the mechanism; it is not yet implemented.
 
 ## Consequences
 

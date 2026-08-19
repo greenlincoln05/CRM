@@ -81,8 +81,11 @@ conditions are recorded in ADRs 0003 and 0004.
 
 - Create the invite-only Clerk instance and supply keys (see above)
 - Read-only credentials and network access to the on-prem Evosus SQL Server, or a vendor CSV export
-- `LCP_FIELD_KEY` backed up offline. ADR 0005 proposes KMS-wrapped with a sealed offline copy — still proposed, not accepted, nothing implemented
-- Whether to accept ADRs 0005 and 0006 (0004 was accepted 2026-08-18)
+- `LCP_FIELD_KEY` custody per ADR 0005 (accepted 2026-08-18): the AWS KMS
+  wrapping is unimplemented code, and the sealed offline copy is a physical
+  act only Lincoln can perform — generate the key and write it down at the
+  same sitting, before real data exists
+- AWS account for KMS (ADR 0005) and the Clerk instance (ADR 0004) — both accepted, neither provisioned
 
 ## Incident log
 
@@ -98,5 +101,5 @@ Technician mobile app · service and dispatch · inventory · purchasing · POS 
 ## Next up
 
 1. Create the invite-only Clerk instance and exercise the auth path end to end
-2. Decide ADR 0005 (`LCP_FIELD_KEY` custody)
+2. Implement ADR 0005: KMS-unwrap at boot in packages/db, wrapped key in the deploy env, sealed offline copy
 3. Run discovery against real Evosus, correct `mappings/evosus.ts`, read the issue report
