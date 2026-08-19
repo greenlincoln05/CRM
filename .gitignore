@@ -38,6 +38,10 @@ Thumbs.db
 # pglite dev database
 .pgdata/
 
+# Review-gate marker: a fact about THIS working copy at this moment, not
+# something to carry to another machine. See .claude/hooks/review-gate.mjs.
+.claude/review-state.json
+
 # build info
 *.tsbuildinfo
 

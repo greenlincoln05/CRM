@@ -30,17 +30,48 @@ in place once accepted — supersede instead.
 
 ## Which agent
 
+Start with `orchestrator` when the work touches more than one layer — it returns a
+plan naming who does what, in the order the seams require.
+
 | Work | Agent |
 |---|---|
+| Decomposing a feature, deciding who does what | `orchestrator` |
 | Start or end a session, "where were we" | `session-scribe` |
 | Tables, columns, migrations, search behaviour | `schema-steward` |
+| Write layer, server actions, routes, queries, session | `backend-builder` |
+| Office pages, technician PWA, forms, CSS | `frontend-builder` |
+| Hosting, env vars, deploy config, KMS/R2/Neon | `cloud-architect` |
 | Evosus discovery, extract, mappings, transform | `migration-engineer` |
 | Reading an ETL run's issue report, deciding what to fix | `data-quality-analyst` |
 | Anything touching gate codes, access notes, photos, PII | `sensitive-data-guard` |
 | What to build next, phase sequencing, build vs buy | `cutover-planner` |
-| Before committing anything non-trivial | `repo-reviewer` |
+| **Every code change, before it is pushed** | `repo-reviewer` |
 
-Web UI and general implementation stay on the main thread.
+The builders do not commit and do not push. They finish, verify, and hand the diff
+to review.
+
+## The review gate
+
+Nothing reaches the remote unreviewed, and that is enforced rather than trusted:
+a `PreToolUse` hook blocks `git push` unless `.claude/review-state.json` records a
+review of the exact commit being pushed.
+
+```
+build  →  verify  →  commit  →  repo-reviewer  →  mark  →  push
+```
+
+After a review is done and its findings are fixed or consciously accepted:
+
+```bash
+node .claude/hooks/mark-reviewed.mjs repo-reviewer
+```
+
+Add `sensitive-data-guard` as a second reviewer whenever the change touches gate
+codes, access notes, photos, or PII — and name both when marking.
+
+Commit again and the marker goes stale, so an amend or one-more-small-fix re-arms
+the gate. That is the intent: commit 56bf5be lost three files to a push nobody
+checked, and the repo has been paying for it since.
 
 ## Non-negotiables
 
