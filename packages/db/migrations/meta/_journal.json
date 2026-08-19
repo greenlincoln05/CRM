@@ -50,6 +50,27 @@
       "when": 1787100403909,
       "tag": "0006_encrypt_sensitive_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787100847478,
+      "tag": "0007_work_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787101229387,
+      "tag": "0008_staff_auth_and_writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787101230387,
+      "tag": "0009_account_number_unique",
+      "breakpoints": true
     }
   ]
 }

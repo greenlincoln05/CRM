@@ -1,7 +1,10 @@
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadRepoEnv } from '@lcp/db';
 
 loadRepoEnv();
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 /**
  * ETL configuration.
@@ -24,7 +27,8 @@ export const config = {
     trustServerCertificate:
       (process.env.LEGACY_MSSQL_TRUST_SERVER_CERT ?? 'true') === 'true',
   },
-  dataDir: resolve(process.env.ETL_DATA_DIR ?? './data'),
+  /** Anchored to the repo root so every workspace package agrees on one path. */
+  dataDir: resolve(repoRoot, process.env.ETL_DATA_DIR ?? './data'),
   /** Rows per batch when streaming out of SQL Server. */
   batchSize: Number(process.env.ETL_BATCH_SIZE ?? 2000),
 };

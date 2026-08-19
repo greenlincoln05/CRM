@@ -1,11 +1,20 @@
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, boolean, timestamp, integer, numeric, jsonb, bigserial, index,
+  pgTable, uuid, text, boolean, timestamp, integer, numeric, jsonb, bigserial,
+  index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { provenance, timestamps } from './_shared.js';
 import { customer, property } from './customer.js';
 
-/** Employees. Auth lives with the identity provider; this is the local mirror. */
+/**
+ * Employees. Auth is meant to live with an identity provider and this is the
+ * local mirror - but the provider has not been bought yet and Sprint 2 needs
+ * every write to carry a name, so the interim credential lives here too.
+ *
+ * The interim part is the pin_* / lockout columns. Everything that references a
+ * user references the id, so swapping in Clerk or WorkOS later means filling in
+ * external_id and dropping four columns. See ADR 0005.
+ */
 export const appUser = pgTable('app_user', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   externalId: text('external_id'),          // id from Clerk/WorkOS
@@ -13,9 +22,53 @@ export const appUser = pgTable('app_user', {
   displayName: text('display_name').notNull(),
   role: text('role').notNull().default('staff'), // admin | manager | staff | tech
   active: boolean('active').notNull().default(true),
+
+  /**
+   * SENSITIVE. scrypt hash of the counter PIN - never the PIN, never anything
+   * reversible. Set through setPin(); verified through verifyPin(). A null here
+   * means the account exists but cannot sign in yet.
+   */
+  pinHash: text('pin_hash'),
+  pinSetAt: timestamp('pin_set_at', { withTimezone: true }),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+
+  /** Reset on success. Drives the lockout below, so a PIN cannot be guessed. */
+  failedAttempts: integer('failed_attempts').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+
   ...timestamps,
 }, (t) => [
-  index('app_user_email_idx').on(t.email),
+  uniqueIndex('app_user_email_idx').on(sql`lower(${t.email})`),
+]);
+
+/**
+ * Signed-in sessions.
+ *
+ * Server-side rather than a self-contained signed cookie, because the realistic
+ * failure is not a forged token: it is the shop laptop that went home in
+ * somebody's bag, or the seasonal hire who finished in October. Both need a
+ * sign-out that works without the browser's cooperation.
+ *
+ * The cookie carries a random token; this table stores only its SHA-256, so a
+ * stolen backup contains no usable session.
+ */
+export const appSession = pgTable('app_session', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid('user_id').notNull().references(() => appUser.id, { onDelete: 'cascade' }),
+
+  /** SHA-256 of the cookie token. The token itself is never stored. */
+  tokenHash: text('token_hash').notNull(),
+
+  issuedAt: timestamp('issued_at', { withTimezone: true }).notNull().default(sql`now()`),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().default(sql`now()`),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+}, (t) => [
+  uniqueIndex('app_session_token_idx').on(t.tokenHash),
+  index('app_session_user_idx').on(t.userId, t.issuedAt.desc()),
 ]);
 
 /**
@@ -63,8 +116,15 @@ export const timelineEvent = pgTable('timeline_event', {
 
   /** Pinned events float to the top of the feed. "Owes us a liner." */
   pinned: boolean('pinned').notNull().default(false),
-  /** Hidden from the default feed without being deleted. */
+
+  /**
+   * Hidden from the default feed without being deleted - the only sanctioned
+   * alternative to a DELETE the trigger will not allow. Hiding something needs
+   * a name and a reason for the same reason the feed is append-only at all.
+   */
   redactedAt: timestamp('redacted_at', { withTimezone: true }),
+  redactedByUserId: uuid('redacted_by_user_id').references(() => appUser.id),
+  redactedReason: text('redacted_reason'),
 
   ...provenance,
   ...timestamps,
@@ -87,6 +147,21 @@ export const attachment = pgTable('attachment', {
   customerId: uuid('customer_id').references(() => customer.id, { onDelete: 'cascade' }),
   propertyId: uuid('property_id').references(() => property.id, { onDelete: 'set null' }),
   timelineEventId: uuid('timeline_event_id').references(() => timelineEvent.id, { onDelete: 'set null' }),
+  /**
+   * Set when the photo was taken on a job. Typed loosely rather than as a
+   * foreign key to avoid a circular import between timeline and work schemas;
+   * the constraint is added in the migration.
+   */
+  workOrderId: uuid('work_order_id'),
+
+  /**
+   * Client-generated id for photos captured offline. The device names the file
+   * before it has a network, and this is what makes a retried upload land once.
+   */
+  clientActionId: uuid('client_action_id'),
+
+  /** false until the bytes actually arrive; the row exists first. */
+  uploaded: boolean('uploaded').notNull().default(false),
 
   kind: text('kind').notNull().default('photo'), // photo | document | signature | video
 

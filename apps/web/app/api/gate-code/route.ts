@@ -2,22 +2,30 @@ import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { decryptField } from '@lcp/db';
 import { getDb } from '@/lib/db';
+import { getSessionUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Reveal one gate code, and record that it happened.
+ * Reveal one gate code, and record who revealed it.
  *
  * The code is decrypted here and returned once, for one property, to one
  * request. It is never included in the page payload, never in a list response,
  * and never in a log line - which is why this is a POST with an explicit id
  * rather than a field on the customer query.
  *
- * TODO(auth): actorLabel is a placeholder until the identity provider is wired
- * in. Once it is, this route must reject unauthenticated callers and record the
- * real user id. The log table is already shaped for it.
+ * Sprint 2 closed the gap ADR 0003 left open: the reveal is now refused without
+ * a session and recorded against a real user id, so "who had our code" has an
+ * answer with a name in it rather than "unauthenticated-dev".
  */
 export async function POST(request: Request) {
+  // 401 rather than a redirect: this is called by fetch(), and an HTML login
+  // page arriving where JSON was expected reads as a success to the caller.
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Sign in to view gate codes.' }, { status: 401 });
+  }
+
   const { db } = await getDb();
 
   let propertyId: string;
@@ -55,8 +63,8 @@ export async function POST(request: Request) {
 
   // Log BEFORE returning: a reveal that failed to record must not succeed.
   await db.execute(sql`
-    INSERT INTO sensitive_access_log (actor_label, entity, entity_id, field, reason, ip, user_agent)
-    VALUES (${'unauthenticated-dev'}, 'property', ${propertyId}::uuid, 'gate_code',
+    INSERT INTO sensitive_access_log (user_id, actor_label, entity, entity_id, field, reason, ip, user_agent)
+    VALUES (${user.userId}::uuid, ${user.label}, 'property', ${propertyId}::uuid, 'gate_code',
             ${`Viewed for ${found.display_name} — ${found.label ?? 'property'}`},
             ${request.headers.get('x-forwarded-for') ?? null},
             ${request.headers.get('user-agent') ?? null})

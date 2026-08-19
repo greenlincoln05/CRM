@@ -12,6 +12,9 @@
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "studio": "drizzle-kit studio",
+    "user": "tsx src/user-cli.ts",
+    "smoke": "tsx src/smoke.ts",
+    "smoke:writes": "tsx src/smoke-writes.ts",
     "check": "tsc --noEmit"
   },
   "dependencies": {

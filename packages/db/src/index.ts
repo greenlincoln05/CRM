@@ -62,3 +62,5 @@ export async function createDb(
 }
 export * from './crypto.js';
 export * from './env.js';
+export * from './auth.js';
+export * from './write/index.js';
