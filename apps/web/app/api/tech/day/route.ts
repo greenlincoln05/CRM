@@ -53,6 +53,7 @@ export async function GET(request: Request) {
     SELECT
       w.id, w.number, w.type, w.status, w.priority, w.scheduled_window,
       w.estimated_minutes, w.sequence, w.summary, w.instructions, w.work_performed,
+      w.incomplete_reason,
       w.customer_id, w.property_id,
       c.display_name  AS customer_name,
       c.primary_phone AS customer_phone,

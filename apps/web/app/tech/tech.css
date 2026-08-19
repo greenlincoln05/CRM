@@ -140,8 +140,45 @@
 }
 .t-btn:active { transform: scale(.985); }
 .t-btn.primary { background: var(--t-accent); border-color: var(--t-accent); color: var(--t-accent-ink); }
+.t-btn.warn { background: var(--t-warn); border-color: var(--t-warn); color: var(--t-warn-ink); }
 .t-btn.wide { grid-column: 1 / -1; }
 .t-btn[disabled] { opacity: .45; }
+
+/* ── "couldn't finish" — the reason panel ───────────────────────────── */
+
+/* Canned reasons are full-width rows rather than a select or a chip grid.
+   A select is a native picker to fight one-handed in the rain, and small chips
+   miss. These are 56px rows in reading order, and the one that is chosen is
+   obvious from across a driveway. */
+.t-why-ask { margin: 0 0 10px; font-size: 18px; font-weight: 650; }
+
+.t-reasons { display: grid; gap: 8px; }
+.t-reason {
+  min-height: 56px; width: 100%; text-align: left;
+  padding: 12px 14px;
+  background: var(--t-surface-2); color: var(--t-text);
+  border: 1px solid var(--t-border); border-left: 4px solid var(--t-border);
+  border-radius: var(--t-radius);
+  font: inherit; font-size: 17px; cursor: pointer;
+}
+.t-reason:active { background: var(--t-border); }
+.t-reason.on {
+  background: var(--t-accent); border-color: var(--t-accent);
+  border-left-color: var(--t-accent-ink);
+  color: var(--t-accent-ink); font-weight: 700;
+}
+
+.t-why-detail { min-height: 76px; margin-top: 12px; }
+
+/* Back stays deliberately narrower than confirm - the wrong one to hit by
+   accident is the one that ends the job. */
+.t-whybar { display: grid; grid-template-columns: 1fr 1.6fr; gap: 8px; margin-top: 12px; }
+.t-why-hint { color: var(--t-dim); font-size: 14px; margin: 8px 0 0; }
+
+/* Queued and sent are different facts, and only one of them is true behind a
+   boathouse. The screen says which. */
+.t-sendstate { color: var(--t-accent); font-size: 13px; margin-top: 6px; }
+.t-sendstate.waiting { color: var(--t-warn); }
 
 /* ── checklist ──────────────────────────────────────────────────────── */
 

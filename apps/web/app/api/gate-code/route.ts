@@ -17,6 +17,11 @@ export const dynamic = 'force-dynamic';
  * Sprint 2 closed the gap ADR 0003 left open: the reveal is now refused without
  * a session and recorded against a real user id, so "who had our code" has an
  * answer with a name in it rather than "unauthenticated-dev".
+ *
+ * ADR 0003 also deferred point 1 - "only on a property a technician has an
+ * assigned job for" - until dispatch existed to scope to. Dispatch shipped, so
+ * that condition has come due and is enforced below. The scope is field versus
+ * office, not rank: see the comment on the check itself.
  */
 export async function POST(request: Request) {
   // 401 rather than a redirect: this is called by fetch(), and an HTML login
@@ -27,6 +32,7 @@ export async function POST(request: Request) {
   }
 
   const { db } = await getDb();
+  const rows = (r: any) => (r?.rows ?? r) as any[];
 
   let propertyId: string;
   try {
@@ -39,7 +45,60 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'propertyId (uuid) required' }, { status: 400 });
   }
 
-  const rows = (r: any) => (r?.rows ?? r) as any[];
+  // ADR 0003 point 1, now that there are jobs to scope to. A technician gets
+  // the code for a house they are actually working, and nothing else.
+  //
+  // The split is field versus office, NOT rank. Do not reuse the
+  // `supervisor = admin || manager` predicate from /api/tech/photo, sync or
+  // day: both packages/db/src/auth.ts and user-cli.ts default a new user to
+  // 'staff', so everyone behind the counter is staff and staff is never
+  // assigned a job. Scoping by rank would 403 the whole office.
+  //
+  // The office stays unscoped on purpose. The counter takes the "I'm locked
+  // out, what have you got on file" call and reads the code to a technician
+  // whose phone will not show it. Locking the counter out does not remove that
+  // call, it moves gate codes onto sticky notes. Every reveal is logged either
+  // way, and the audit trail is the control there.
+  //
+  // Checked before the property is looked up, so a refusal does not also
+  // answer "is there a code on file for this address".
+  if (user.role === 'tech') {
+    const assigned = rows(await db.execute(sql`
+      SELECT 1
+      FROM work_order w
+      WHERE w.property_id = ${propertyId}::uuid
+        AND w.assigned_user_id = ${user.userId}::uuid
+        AND w.status <> 'cancelled'
+        AND (
+          w.scheduled_date IS NULL
+          OR w.scheduled_date BETWEEN
+               (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date - 1
+           AND (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date + 7
+        )
+      LIMIT 1`));
+
+    // The window: yesterday through next week. Wide enough that a job that ran
+    // long, got pushed a day, or is being prepped for Monday still opens the
+    // gate; narrow enough that a job from last April does not. Unscheduled work
+    // is included because an unscheduled assigned job is a real job.
+    //
+    // CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York', never CURRENT_DATE -
+    // the server clock is GMT and CURRENT_DATE rolls over in the evening here.
+    if (!assigned.length) {
+      // No label, no customer name, no address: this line says who asked about
+      // which id, and the id is only meaningful to someone who can already
+      // query the database.
+      console.warn('[gate-code] refused — no assigned job', user.userId, propertyId);
+      return NextResponse.json(
+        {
+          error:
+            'That job is not assigned to you, so this gate code is not available on your phone. '
+            + 'Call the office — they can read you the code, or assign you the job.',
+        },
+        { status: 403 },
+      );
+    }
+  }
 
   const found = rows(await db.execute(sql`
     SELECT p.gate_code_enc, p.label, c.display_name

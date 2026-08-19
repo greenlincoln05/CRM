@@ -1,0 +1,4 @@
+{
+  "//": "These scripts are ESM. apps/web/package.json has no \"type\", so tsx compiled anything under it as CommonJS and refused the top-level await smoke-tech-api.ts is written around — the suite could not be run at all. Scoped here rather than on apps/web/package.json, which would change how Next treats the app's own files.",
+  "type": "module"
+}

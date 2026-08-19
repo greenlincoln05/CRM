@@ -117,6 +117,8 @@ export type Job = {
   property_id: string | null;
   customer_id: string;
   work_performed?: string | null;
+  /** Why a job could not be finished. Carried by /api/tech/day for the tech's own jobs. */
+  incomplete_reason?: string | null;
   /** Set locally the moment a tech acts, before any sync. */
   dirty?: boolean;
 };
@@ -128,6 +130,28 @@ export type Task = {
   label: string;
   done: boolean;
 };
+
+/**
+ * The fields a technician authors on the phone.
+ *
+ * Everything else about a job belongs to the office - the window they moved,
+ * the instruction they added - and should arrive on the next refresh. These
+ * three are the ones the phone is the source of truth for until the outbox
+ * drains, so they are laid back over the fresh server row rather than the whole
+ * local row being kept. `incomplete_reason` is on this list for exactly the
+ * same reason `work_performed` is: it is typed in a driveway with no signal,
+ * and losing it on the next refresh would mean the tech said why for nothing.
+ */
+const LOCAL_FIELDS = ['status', 'work_performed', 'incomplete_reason'] as const;
+
+function withLocalEdits(server: Job, local: Job): Job {
+  const merged: Job = { ...server, dirty: true };
+  for (const field of LOCAL_FIELDS) {
+    const value = local[field];
+    if (value != null) (merged as Record<string, unknown>)[field] = value;
+  }
+  return merged;
+}
 
 export async function saveDay(jobs: Job[], tasks: Task[]) {
   const db = await openDb();
@@ -146,7 +170,10 @@ export async function saveDay(jobs: Job[], tasks: Task[]) {
       );
       jobStore.clear();
       taskStore.clear();
-      for (const j of jobs) jobStore.put(dirty.get(j.id) ?? j);
+      for (const j of jobs) {
+        const local = dirty.get(j.id);
+        jobStore.put(local ? withLocalEdits(j, local) : j);
+      }
       for (const k of tasks) taskStore.put(k);
     };
 

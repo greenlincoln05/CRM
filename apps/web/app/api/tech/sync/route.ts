@@ -52,7 +52,7 @@ export async function POST(request: Request) {
   try {
     switch (kind) {
       case 'job_status': {
-        const { workOrderId, status } = payload ?? {};
+        const { workOrderId, status, incompleteReason } = payload ?? {};
         if (!workOrderId || !status) throw new Error('workOrderId and status required');
 
         const valid = ['scheduled', 'en_route', 'on_site', 'complete', 'incomplete', 'cancelled'];
@@ -61,12 +61,28 @@ export async function POST(request: Request) {
         const denied = await assertOwnsJob(db, user, workOrderId);
         if (denied) return denied;
 
+        // The reason rides along with the status change rather than following
+        // it. Two reasons, and both are load-bearing:
+        //
+        //   - The timeline event below re-reads this row. Written afterwards,
+        //     by a second action, the reason arrives after the event is already
+        //     on the feed - and the feed is append-only by trigger, so that row
+        //     can never be corrected.
+        //   - The outbox orders by seq = Date.now(); two actions queued in the
+        //     same millisecond tie, and a tie can replay in either order.
+        //
+        // One UPDATE, then the event, sidesteps both.
+        const reason = typeof incompleteReason === 'string' && incompleteReason.trim()
+          ? incompleteReason.trim()
+          : null;
+
         await db.execute(sql`
           UPDATE work_order SET
             status       = ${status},
             en_route_at  = CASE WHEN ${status} = 'en_route' THEN ${at}::timestamptz ELSE en_route_at END,
             arrived_at   = CASE WHEN ${status} = 'on_site'  THEN ${at}::timestamptz ELSE arrived_at END,
             completed_at = CASE WHEN ${status} IN ('complete','incomplete') THEN ${at}::timestamptz ELSE completed_at END,
+            incomplete_reason = COALESCE(${reason}, incomplete_reason),
             updated_at   = now()
           WHERE id = ${workOrderId}::uuid`);
 
