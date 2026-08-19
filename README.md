@@ -58,6 +58,7 @@ system does.
 packages/db     schema, migrations, database client
 packages/etl    Evosus discovery, extraction, transform, data quality reports
 apps/           web and mobile (not yet started)
+docs/           cloud architecture and deployment
 docs/adr/       why things are the way they are
 ```
 
