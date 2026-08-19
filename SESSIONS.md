@@ -83,3 +83,7 @@ written.
 
 **Next.** Commit and push (branch `docs/cloud-architecture` is still local-only);
 real auth on the gate code reveal endpoint; run discovery against real Evosus.
+
+**Merged.** `docs/cloud-architecture` fast-forward merged to `main` and pushed
+(`56bf5be..d32e2bc`). The default branch builds again for a fresh clone; the
+reconstruction survives off this machine. Both branch refs point at `d32e2bc`.
