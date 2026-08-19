@@ -267,12 +267,10 @@ PublishScripts/
 *.nupkg
 # NuGet Symbol Packages
 *.snupkg
-# The packages folder can be ignored because of Package Restore
-**/[Pp]ackages/*
-# except build/, which is used as an MSBuild target.
-!**/[Pp]ackages/build/
-# Uncomment if necessary however generally it will be regenerated when needed
-#!**/[Pp]ackages/repositories.config
+# NOTE: the stock NuGet rule `**/[Pp]ackages/*` is deliberately ABSENT. This is
+# a Node monorepo whose source lives in /packages — that rule silently ignored
+# every new file under it, which is exactly how crypto.ts, env.ts, and
+# migration 0006 were lost from commit 56bf5be. Do not restore it.
 # NuGet v3's project.json files produces more ignorable files
 *.nuget.props
 *.nuget.targets

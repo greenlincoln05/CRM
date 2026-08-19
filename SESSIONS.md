@@ -49,3 +49,37 @@ journal entry 6.
 
 **Next.** Recover-or-reconstruct the three files; push or merge
 `docs/cloud-architecture`; then real auth on the gate code reveal endpoint.
+
+## 2026-08-18 — Lost encryption files reconstructed, gitignore trap found
+
+**Built.** The three files missing from `56bf5be`, reconstructed from the schema
+and ADR 0003: `packages/db/src/crypto.ts` (AES-256-GCM, `v1:` + base64(iv||ct||tag)
+wire format, null passthrough, `LCP_FIELD_KEY` from env with a persisted dev-only
+key fallback at `.pgdata/dev-field-key` when no `DATABASE_URL`),
+`packages/db/src/env.ts` (`loadRepoEnv`, repo-root `.env` parser, BOM-safe), and
+`packages/db/migrations/0006_encrypt_sensitive_fields.sql` (`gate_code` →
+`gate_code_enc`, `sensitive_access_log` + append-only trigger). Plus
+`meta/0006_snapshot.json` hand-built to match — `drizzle-kit generate` reports
+"No schema changes".
+
+**Found.** Root cause of the loss: `.gitignore`'s stock Visual Studio section
+carried the NuGet rule `**/[Pp]ackages/*`, silently ignoring every new file
+under `packages/`. That is how the originals never made it into `56bf5be`. Rule
+deleted with an explanatory comment; the three files are now visible to git.
+Repo-reviewer findings all addressed: gitignore trap (fixed), missing snapshot
+(built), cache-before-validate in `crypto.ts` (fixed), BOM in `env.ts` (fixed).
+
+**Verified.** Fresh `.pgdata` migrate passes all 7 migrations; etl demo 36/36
+PASS including `v1:` format and decrypt roundtrip; `tsc` clean in db, etl, web;
+append-only trigger on `sensitive_access_log` blocks UPDATE and DELETE (probed
+directly).
+
+**Caveat.** This is a reconstruction: ciphertext written by the original lost
+implementation is not guaranteed to decrypt under this one. Only synthetic demo
+data ever existed, so nothing real is lost. Noted in the `crypto.ts` header.
+
+**Decided.** Nothing architectural — the reconstruction implements ADR 0003 as
+written.
+
+**Next.** Commit and push (branch `docs/cloud-architecture` is still local-only);
+real auth on the gate code reveal endpoint; run discovery against real Evosus.
