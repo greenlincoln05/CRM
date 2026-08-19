@@ -379,3 +379,6 @@ button.primary:disabled, button.danger:disabled { opacity: .55; cursor: default;
   background: var(--warn-soft); border: 1px solid var(--warn); color: var(--warn);
 }
 .flag b { font-weight: 600; }
+/* On the board the flag carries a link out to the one-customer screen, because
+   the sentence behind it is not shown in a list of forty addresses. */
+.flag a { text-decoration: underline; }

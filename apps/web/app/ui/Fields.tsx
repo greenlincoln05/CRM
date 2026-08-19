@@ -242,7 +242,8 @@ export function PropertyFields({ p, includeGateCode }: {
       <fieldset>
         <legend>Arrival knowledge</legend>
         <TextArea label="Access notes" name="accessNotes" defaultValue={p?.access_notes}
-          placeholder="Gate on the left side of the garage." />
+          placeholder="Gate on the left side of the garage."
+          hint="How to get in, not what to type in. A gate or lockbox code belongs in the gate code field, where it is encrypted." />
         <TextArea label="Pets" name="petNotes" defaultValue={p?.pet_notes} rows={2}
           placeholder="Golden retriever, Moose. Friendly but loud." />
         <div className="row2">
@@ -337,8 +338,13 @@ export function JobFields({ propertyOptions, technicians }: {
       <Field label="Estimated time (minutes)" name="estimatedMinutes" inputMode="numeric"
         placeholder="90" />
 
+      {/* The hint is the whole defence here. A code typed into a sentence goes
+          around the encrypted column and around the column-level care taken in
+          getDaySchedule, and this box is the likeliest place in the office app
+          for that to happen. */}
       <TextArea label="Instructions" name="instructions" rows={2}
-        placeholder="Check in at the front desk before going to the pump house." />
+        placeholder="Check in at the front desk before going to the pump house."
+        hint="Never put a gate or lockbox code here — set it on the property, where it is encrypted." />
     </>
   );
 }

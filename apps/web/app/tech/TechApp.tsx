@@ -384,10 +384,20 @@ function JobDetail({ job, tasks, onBack, onStatus, onToggleTask, onSaveNotes, on
         </p>
       </div>
 
+      {/* The only box on the phone that takes free text about a property, and
+          therefore the likeliest origin of a gate code in plaintext: the
+          sentence that writes itself at a gate that did not open is "code on
+          file is wrong, owner says it's now 1234". That would land in
+          work_order beside the encrypted column and read back in the office, so
+          it is worth one line of type here to head off. */}
       <div className="t-card">
         <h3>What you did</h3>
         <textarea className="t-textarea" value={notes} onChange={(e) => setNotes(e.target.value)}
                   placeholder="Parts used, what you found, what still needs doing…" />
+        <p className="t-warnline">
+          Never type a gate or lockbox code here. If a code is wrong, call the
+          office and they will change it on the property.
+        </p>
         <div className="t-saved">{savedAt}</div>
       </div>
     </>

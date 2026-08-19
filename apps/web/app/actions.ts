@@ -69,8 +69,13 @@ async function run(
     if (err instanceof WriteError) {
       return { ok: false, error: err.message, field: err.field };
     }
-    console.error('[action]', err);
-    return { ok: false, error: 'That could not be saved. The error has been logged.' };
+    // The message only. A driver error carries the failing statement and its
+    // parameters, which for these actions means whatever the office typed into
+    // instructions or a summary - customer detail that has no business sitting
+    // in a server log. The ref gives support something to match on.
+    const ref = Math.random().toString(36).slice(2, 8);
+    console.error(`[action] ${ref}:`, err instanceof Error ? err.message : String(err));
+    return { ok: false, error: `That could not be saved. The error has been logged (ref ${ref}).` };
   }
 }
 
@@ -299,16 +304,21 @@ export async function recordWaterTestAction(_prev: FormState, fd: FormData): Pro
 /**
  * A job shows up in two places, so both get revalidated: the customer's record,
  * where it sits beside their history, and the day board the office dispatches
- * from. `/schedule` has no route yet - revalidating a path nothing renders is a
- * no-op, and naming it now is cheaper than remembering to come back for it.
+ * from.
  */
 const jobPaths = (customerId: string) => [`/customers/${customerId}`, '/schedule'];
 
 /**
  * Nothing is checked here on purpose - not the type, not the date, not whether
  * the property belongs to the customer. All of it is in createWorkOrder, where
- * the seed fixture and anything Sprint 4 dispatch builds get it too, and where
- * it is tested without a browser.
+ * anything Sprint 4 dispatch builds gets it too, and where it is tested
+ * without a browser.
+ *
+ * `status` is the one field deliberately NOT read from the form. There is no
+ * status control on the booking form, but a hand-crafted POST could otherwise
+ * set one - and a job created `complete`, with no completion timestamps under
+ * it and no visit behind it, is a lie the board then renders as uneditable. A
+ * new job is scheduled; finishing it is what the phone is for.
  */
 export async function createWorkOrderAction(_prev: FormState, fd: FormData): Promise<FormState> {
   const customerId = String(fd.get('customerId') ?? '');
@@ -316,7 +326,6 @@ export async function createWorkOrderAction(_prev: FormState, fd: FormData): Pro
     customerId,
     propertyId: str(fd, 'propertyId'),
     type: str(fd, 'type'),
-    status: str(fd, 'status'),
     priority: str(fd, 'priority'),
     scheduledDate: str(fd, 'scheduledDate'),
     scheduledWindow: str(fd, 'scheduledWindow'),

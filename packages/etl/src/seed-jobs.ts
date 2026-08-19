@@ -117,7 +117,7 @@ export async function seedJobs() {
                               legacy_source, legacy_id)
       VALUES ('W-' || nextval('work_order_number_seq'),
               ${p.customer_id}, ${p.id}, ${job.type}, ${job.status},
-              ${job.priority}, CURRENT_DATE, ${job.window}, ${job.mins}, ${job.seq},
+              ${job.priority}, (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date, ${job.window}, ${job.mins}, ${job.seq},
               ${mike.id}, ${job.summary}, ${job.instructions},
               ${SOURCE}, ${legacyId})
       ON CONFLICT (legacy_source, legacy_id) WHERE legacy_id IS NOT NULL DO NOTHING

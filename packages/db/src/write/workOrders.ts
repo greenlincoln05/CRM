@@ -14,8 +14,11 @@ import {
  * rows the office had no way of making. This is the other half of that.
  *
  * Three things here are business rules rather than plumbing, and they live at
- * this layer so that the server action, the seed fixture and anything Sprint 4
- * builds all get them for free:
+ * this layer so that the server action and anything Sprint 4 builds get them
+ * for free. (The seed fixture is not among them — it hand-rolls its own INSERT
+ * and borrows only `tasksForType`, so it skips the ownership check, the
+ * validation and the timeline event. That is fine for synthetic data and would
+ * not be fine for anything else.):
  *
  *   1. The number comes from `work_order_number_seq` (migration 0010), never
  *      from counting rows. Two people creating a job from two terminals both
@@ -246,6 +249,12 @@ function scheduleLine(v: {
  * into. The sequence is not the column's DEFAULT on purpose: legacy jobs arrive
  * from Evosus already numbered and must keep the number on the customer's
  * paperwork. See migration 0010.
+ *
+ * Expect gaps. `nextval` is deliberately outside transaction control, so a job
+ * whose checklist or timeline write fails rolls the row back but keeps the
+ * number spent. That is the right trade: a gap prompts "where did W-1042 go",
+ * which has a dull answer, while reuse would put two different visits on one
+ * number, which does not.
  */
 export async function createWorkOrder(
   db: Db, actor: Actor, input: WorkOrderInput,

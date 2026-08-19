@@ -22,6 +22,19 @@ export const dynamic = 'force-dynamic';
  * behind a counter is the exact shape that must never exist, and a "reveal"
  * control on a row here is how it would come to.
  *
+ * NO FREE TEXT ABOUT A PROPERTY IS RENDERED HERE EITHER, and that is the same
+ * rule rather than a second one. Choosing the columns protects against a code
+ * in the column built for codes; it does nothing about a code typed into a
+ * sentence. `instructions`, `work_performed` and `incomplete_reason` are all
+ * boxes a person types prose into, and the most natural sentence in the world
+ * for a technician standing at a gate that did not open is "keypad code on file
+ * didn't work, owner says it's now 1234". That lands in `work_order` as
+ * plaintext one table over from the encrypted column, and rendering it here
+ * would put it on a list of forty addresses - exactly what the encryption
+ * exists to prevent. So the board says a job was left unfinished, loudly,
+ * because dispatch has to know that; the sentence itself is read one customer
+ * at a time on their own record.
+ *
  * Cancelled jobs are shown rather than dropped. "Why is nobody going to the
  * Nadeaus today" is a question this screen exists to answer, and a row that has
  * quietly vanished answers it with silence.
@@ -97,14 +110,19 @@ function JobRow({ job, technicians }: {
         </div>
 
         {job.summary && <div className="note"><b>Job</b> · {job.summary}</div>}
-        {job.instructions && <div className="note"><b>Office</b> · {job.instructions}</div>}
-        {job.work_performed && <div className="note"><b>Performed</b> · {job.work_performed}</div>}
 
-        {/* The reason the phone wrote and nothing in the office read back until
-            now. It is the thing that generates the next job, so it gets the
-            loudest treatment on the row rather than a line of grey text. */}
+        {/* The fact, not the sentence. `incomplete_reason` is the thing that
+            generates the next job, so dispatch has to see at a glance that this
+            visit did not finish - hence the amber block rather than a line of
+            grey text - but the technician's own words are read on the one
+            screen that is about one customer. See the note at the top. */}
         {job.incomplete_reason && (
-          <div className="flag"><b>Left unfinished</b> · {job.incomplete_reason}</div>
+          <div className="flag">
+            <b>Left unfinished</b> ·{' '}
+            <a href={`/customers/${job.customer_id}`}>
+              read why on {job.customer_name}&apos;s record
+            </a>
+          </div>
         )}
 
         {job.status === 'cancelled' && (
@@ -120,7 +138,20 @@ function JobRow({ job, technicians }: {
             <ActionForm action={rescheduleWorkOrderAction} submitLabel="Save the change">
               <input type="hidden" name="customerId" value={job.customer_id} />
               <input type="hidden" name="workOrderId" value={job.id} />
-              <ScheduleFields w={job} technicians={technicians} />
+              {/* The four scheduling columns, named one by one rather than
+                  handing the whole row across the client boundary. Same reason
+                  the SELECT list in getDaySchedule is written out by hand: what
+                  crosses should be what is needed, so that a column added to
+                  the row later does not silently start travelling with it. */}
+              <ScheduleFields
+                w={{
+                  scheduled_date: job.scheduled_date,
+                  scheduled_window: job.scheduled_window,
+                  sequence: job.sequence,
+                  assigned_user_id: job.assigned_user_id,
+                }}
+                technicians={technicians}
+              />
             </ActionForm>
           </details>
         )}

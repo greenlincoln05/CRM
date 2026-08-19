@@ -268,7 +268,7 @@ export async function getWorkOrders(customerId: string, limit = 50): Promise<Wor
            w.scheduled_date::text AS scheduled_date,
            w.scheduled_window, w.estimated_minutes, w.sequence,
            w.summary, w.instructions, w.work_performed, w.incomplete_reason,
-           w.completed_at, w.property_id,
+           w.completed_at::text, w.property_id,
            p.label AS property_label,
            w.assigned_user_id, u.display_name AS assignee,
            (SELECT count(*)::int FROM work_order_task t
@@ -326,7 +326,7 @@ export async function getDaySchedule(date?: string | null): Promise<ScheduledJob
            w.scheduled_date::text AS scheduled_date,
            w.scheduled_window, w.estimated_minutes, w.sequence,
            w.summary, w.instructions, w.work_performed, w.incomplete_reason,
-           w.en_route_at, w.arrived_at, w.completed_at,
+           w.en_route_at::text, w.arrived_at::text, w.completed_at::text,
            w.customer_id, w.property_id,
            w.assigned_user_id, u.display_name AS assignee,
            c.display_name  AS customer_name,
@@ -343,7 +343,7 @@ export async function getDaySchedule(date?: string | null): Promise<ScheduledJob
       LEFT JOIN app_user u ON u.id = w.assigned_user_id
       LEFT JOIN property p ON p.id = w.property_id
       LEFT JOIN address  a ON a.id = p.address_id
-     WHERE w.scheduled_date = COALESCE(${date ?? null}::date, CURRENT_DATE)
+     WHERE w.scheduled_date = COALESCE(${date ?? null}::date, (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date)
      ORDER BY (w.assigned_user_id IS NULL), u.display_name,
               w.sequence NULLS LAST, w.scheduled_window
   `));

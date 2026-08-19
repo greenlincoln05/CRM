@@ -65,7 +65,7 @@ export async function GET(request: Request) {
     LEFT JOIN property p ON p.id = w.property_id
     LEFT JOIN address  a ON a.id = p.address_id
     WHERE w.assigned_user_id = ${tech.id}::uuid
-      AND w.scheduled_date = COALESCE(${date ?? null}::date, CURRENT_DATE)
+      AND w.scheduled_date = COALESCE(${date ?? null}::date, (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date)
     ORDER BY w.sequence NULLS LAST, w.scheduled_window
   `));
 

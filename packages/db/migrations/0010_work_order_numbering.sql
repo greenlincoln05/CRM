@@ -22,6 +22,26 @@
 CREATE SEQUENCE work_order_number_seq START 1001;
 --> statement-breakpoint
 
+-- Then move it past anything already numbered.
+--
+-- The seed fixture used to write W-1001..W-1004 literally. On a database that
+-- ran it once there are no duplicates, so the unique index below builds fine
+-- and this migration reports success — and then the first four jobs booked
+-- from the office each collide on a number that already exists, failing in a
+-- way that looks intermittent because the fifth one works.
+--
+-- GREATEST keeps a fresh database at 1001. The regex only matches our own
+-- W-<digits> shape, so an Evosus number in some other format is ignored
+-- rather than parsed into nonsense.
+SELECT setval(
+  'work_order_number_seq',
+  GREATEST(
+    1001,
+    COALESCE((SELECT max(substring(number from '^W-([0-9]+)$')::bigint) FROM work_order), 1000)
+  )
+);
+--> statement-breakpoint
+
 -- One number, one job.
 --
 -- Today `number` is plain nullable text with nothing stopping a second job

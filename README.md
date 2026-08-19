@@ -20,6 +20,8 @@ edit records, so everything written from the app carries a name.
 | Staff sign-in, sessions, actor on every write | working, tested |
 | Creating and editing customers, contacts, properties | working, tested |
 | Timeline entry, pinning, manager-only redaction | working, tested |
+| Booking, scheduling and cancelling jobs | working, tested |
+| Day board grouped by technician | working |
 | Water tests with out-of-range flagging | working, tested |
 | Gate-code encryption + access log | working |
 | Field key custody (KMS, ADR 0008) | implemented; needs a KMS key and the sealed offline copy |

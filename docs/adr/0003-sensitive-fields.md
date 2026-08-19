@@ -40,8 +40,33 @@ code. Revealing is an explicit POST for one property, and the value re-hides
 after a minute — the realistic risk is a browser left open on the counter, not
 an attacker.
 
-Points 4-5 remain open, and point 5 becomes urgent the moment photo capture
-ships.
+Two list surfaces now exist and both hold that line: `getDaySchedule` behind the
+office `/schedule` board, and `/api/tech/day` for the phone. Each writes its
+SELECT list out by hand and carries only `has_gate_code`.
+
+**The invariant is enforced on columns, and free text goes around it.** The
+office board also renders `instructions`, `work_performed` and
+`incomplete_reason`, which are typed by people. A technician standing at a gate
+that did not open will reasonably type "code on file didn't work, owner says
+it's now 1234" — plaintext, one table over from the encrypted column, and worse,
+`instructions` and a cancellation reason are copied verbatim into timeline
+events, which are append-only by trigger and can never be redacted. The
+mitigation is a warning next to those fields and keeping full free text off list
+views; neither is a guarantee. If a code ever does land in a timeline row,
+removing it takes a migration.
+
+Point 4 is half done. Exports and reports are covered:
+`packages/etl/src/sensitive.ts` encrypts gate-code-shaped keys at the staging
+boundary and strips them from `import_issue` payloads, which are read and pasted
+around. The AI context window half has no code yet and arrives with Phase 4.
+
+Point 5 was written as a future trigger and that trigger has fired — photo
+capture shipped with the technician PWA. Most of the substance is met: storage
+keys are `YYYY/MM/<uuid v4>.<ext>` and unguessable, the key is never a
+browser-facing URL, and bytes are served behind a session rather than from a
+public bucket. What is not done is the signed, short-lived URL: the GET is
+session-gated but not scoped to the viewer's job, and responses are cached
+`immutable` for a year.
 
 Authentication closed 2026-08-18 (ADR 0005, staff authentication): the
 reveal endpoint refuses without a session and records a real `app_user` id, so
@@ -56,6 +81,13 @@ One condition of the current model, decided here:
   property, every reveal logged. With roughly ten staff and no self-service
   signup the audit trail is the control; per-job scoping (point 1's "assigned
   job" wording) arrives with dispatch, when jobs exist to scope to.
+
+  **That condition has come due.** Dispatch shipped 2026-08-19: work orders
+  carry `assigned_user_id` and a scheduled date, so there are now jobs to scope
+  to. `/api/tech/photo` already performs exactly this check — a non-supervisor
+  requesting someone else's job gets a 403 — while `/api/gate-code` remains
+  role-agnostic. The inconsistency is now visible in the code and should be
+  closed deliberately rather than left to drift.
 
 Still open, and blocking before real technicians use this:
 - **Key custody.** `LCP_FIELD_KEY` must be backed up somewhere that is neither

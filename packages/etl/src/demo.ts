@@ -286,7 +286,7 @@ async function verify() {
   const dayJobs = rows(await db.execute(dsql`
     SELECT w.number, w.status, w.priority, u.display_name AS tech
     FROM work_order w JOIN app_user u ON u.id = w.assigned_user_id
-    WHERE w.scheduled_date = CURRENT_DATE ORDER BY w.sequence`));
+    WHERE w.scheduled_date = (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date ORDER BY w.sequence`));
   check('a technician has a day of work scheduled', dayJobs.length === 4, `${dayJobs.length} jobs`);
   check('jobs are assigned to one technician',
     new Set(dayJobs.map((j: any) => j.tech)).size === 1);

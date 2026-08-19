@@ -178,3 +178,11 @@
 
 .t-empty { color: var(--t-dim); text-align: center; padding: 48px 20px; font-size: 16px; }
 .t-saved { color: var(--t-accent); font-size: 13px; margin-top: 6px; min-height: 18px; }
+
+/* One line under the notes box. Read in a driveway in the rain, so it is warn
+   colour and full size rather than fine print - the whole point is that it is
+   noticed before the sentence gets typed, not after. */
+.t-warnline {
+  color: var(--t-warn); font-size: 14px; line-height: 1.4;
+  margin: 8px 0 0;
+}

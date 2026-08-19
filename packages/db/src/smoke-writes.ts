@@ -14,6 +14,7 @@
  * scratch if you do not want it touching your dev data.
  */
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { sql } from 'drizzle-orm';
 import { createDb } from './index.js';
 import {
@@ -781,6 +782,56 @@ check('WriteError carries the field, so a message can land next to the input',
       return err instanceof WriteError && err.field === 'email';
     }
   })());
+
+// ── ADR 0003: what a list view is allowed to carry ─────────────────────────
+//
+// The office day board and the customer's job list are reads over properties,
+// and non-negotiable #4 says a gate code never appears in a list view. Today
+// the only thing enforcing that is a hand-written SELECT list and a comment
+// above it: add `p.access_notes` next sprint because "the tech needs it on the
+// board" and every typecheck, both smoke suites, the demo and the production
+// build still pass. So assert it.
+//
+// These queries live in apps/web and cannot be imported from here, but it is
+// the SQL that matters and the SQL that would change.
+console.log(`\n── ADR 0003: list views ${'─'.repeat(38)}\n`);
+
+const SENSITIVE_COLUMNS = [
+  'gate_code_enc', 'access_notes', 'pet_notes',
+  'water_shutoff_notes', 'electrical_notes', 'parking_notes',
+];
+
+const queriesSrc = await readFile(
+  new URL('../../../apps/web/lib/queries.ts', import.meta.url), 'utf8');
+
+function queryBody(fnName: string): string {
+  const at = queriesSrc.indexOf(`export async function ${fnName}`);
+  if (at < 0) throw new Error(`${fnName} not found in queries.ts`);
+  const end = queriesSrc.indexOf('\nexport ', at + 1);
+  return queriesSrc.slice(at, end < 0 ? undefined : end);
+}
+
+for (const fn of ['getDaySchedule', 'getWorkOrders']) {
+  // has_gate_code is the sanctioned boolean, so the column is allowed to be
+  // named inside that one derivation and nowhere else.
+  const body = queryBody(fn).replace(
+    /\(\s*p\.gate_code_enc\s+IS\s+NOT\s+NULL\s*\)\s+AS\s+has_gate_code/gi, '');
+  const leaked = SENSITIVE_COLUMNS.filter((col) => body.includes(col));
+  check(`${fn} selects no sensitive property column`,
+    leaked.length === 0, leaked.length ? `leaked: ${leaked.join(', ')}` : '');
+}
+
+check('getTechnicians never returns a PIN hash',
+  !queryBody('getTechnicians').includes('pin_hash'));
+
+// And at runtime rather than by reading source: nothing this suite wrote to a
+// work order carries the demo gate code in any column.
+const jobRows = rows<Record<string, unknown>>(await db.execute(sql`
+  SELECT w.*, p.label AS property_label
+    FROM work_order w LEFT JOIN property p ON p.id = w.property_id`));
+check('no work order row carries a gate code in any field',
+  !JSON.stringify(jobRows).includes('4417'),
+  `${jobRows.length} job row(s) scanned`);
 
 console.log(`\n${failures === 0 ? 'ALL WRITE CHECKS PASSED' : `${failures} WRITE CHECK(S) FAILED`}`);
 await close();
