@@ -15,7 +15,11 @@
     "db:generate": "npm run generate -w @lcp/db",
     "db:migrate": "npm run migrate -w @lcp/db",
     "db:studio": "npm run studio -w @lcp/db",
+    "db:user": "npm run user -w @lcp/db",
     "etl": "npm run start -w @lcp/etl",
-    "key": "npm run key -w @lcp/db --"
+    "key": "npm run key -w @lcp/db --",
+    "typecheck": "npm run check -w @lcp/db && npm run check -w @lcp/etl && npm run check -w @lcp/web",
+    "smoke": "npm run smoke -w @lcp/db && npm run smoke:writes -w @lcp/db",
+    "check": "npm run typecheck && npm run smoke"
   }
 }

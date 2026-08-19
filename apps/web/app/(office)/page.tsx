@@ -1,12 +1,11 @@
 import CustomerSearch from './CustomerSearch';
 import { getStats } from '@/lib/queries';
-import { requirePageUser } from '@/lib/require-auth';
+import { requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const { denied } = await requirePageUser();
-  if (denied) return denied;
+  await requireUser();
 
   let stats = { customers: 0, properties: 0, events: 0 };
   let error: string | null = null;
@@ -39,6 +38,12 @@ export default async function Home() {
           {stats.events.toLocaleString()} timeline events
         </p>
       )}
+
+      {/* Below the search box, not above it: the overwhelmingly common case is
+          looking someone up, and a customer who is not found is the rare one. */}
+      <p className="hint">
+        Not on file? <a className="linkish" href="/customers/new">Add a customer</a>
+      </p>
     </>
   );
 }

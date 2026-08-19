@@ -2,28 +2,28 @@ import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { decryptField, initFieldKey } from '@lcp/db';
 import { getDb } from '@/lib/db';
-import { currentAppUser } from '@/lib/auth';
+import { getSessionUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Reveal one gate code, and record who did it.
+ * Reveal one gate code, and record who revealed it.
  *
  * The code is decrypted here and returned once, for one property, to one
  * request. It is never included in the page payload, never in a list response,
  * and never in a log line - which is why this is a POST with an explicit id
  * rather than a field on the customer query.
  *
- * Anonymous callers are rejected before anything else happens - before the
- * body is parsed, before the database is touched. When Clerk is configured
- * the middleware already turned them away; this check is defense in depth,
- * and it is what fails closed if a deployment forgot to configure auth at
- * all (see lib/auth.ts). ADR 0003.
+ * Sprint 2 closed the gap ADR 0003 left open: the reveal is now refused without
+ * a session and recorded against a real user id, so "who had our code" has an
+ * answer with a name in it rather than "unauthenticated-dev".
  */
 export async function POST(request: Request) {
-  const user = await currentAppUser();
+  // 401 rather than a redirect: this is called by fetch(), and an HTML login
+  // page arriving where JSON was expected reads as a success to the caller.
+  const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
+    return NextResponse.json({ error: 'Sign in to view gate codes.' }, { status: 401 });
   }
 
   const { db } = await getDb();
@@ -51,10 +51,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No gate code on file' }, { status: 404 });
   }
 
-  // Idempotent: normally a no-op because instrumentation.ts already unwrapped
-  // at startup. Kept as the backstop, and deliberately OUTSIDE the decrypt
-  // catch below — a KMS failure carries its own precise message (which grant,
-  // which region) and must not be flattened into "wrong key or tampered".
+  // Idempotent: normally a no-op because instrumentation.node.ts already
+  // unwrapped at startup. Kept as the backstop, and deliberately OUTSIDE the
+  // decrypt catch below — a KMS failure carries its own precise message (which
+  // grant, which region) and must not be flattened into "wrong key or
+  // tampered". See ADR 0005.
   try {
     await initFieldKey();
   } catch (err: any) {
@@ -80,14 +81,12 @@ export async function POST(request: Request) {
   }
 
   // Log BEFORE returning: a reveal that failed to record must not succeed.
-  // user_id is the real foreign key; actor_label keeps the log readable
-  // straight out of the table without a join. The reason deliberately does NOT
-  // embed the customer's name: this table is append-only by trigger, so
-  // anything written here can never be redacted. entity_id already identifies
-  // the property; join when reading.
+  // The reason deliberately does NOT embed the customer's name: this table is
+  // append-only by trigger, so anything written here can never be redacted.
+  // entity_id already identifies the property; join when reading.
   await db.execute(sql`
     INSERT INTO sensitive_access_log (user_id, actor_label, entity, entity_id, field, reason, ip, user_agent)
-    VALUES (${user.id}::uuid, ${user.displayName}, 'property', ${propertyId}::uuid, 'gate_code',
+    VALUES (${user.userId}::uuid, ${user.label}, 'property', ${propertyId}::uuid, 'gate_code',
             ${`Viewed from web — ${found.label ?? 'property'}`},
             ${request.headers.get('x-forwarded-for') ?? null},
             ${request.headers.get('user-agent') ?? null})

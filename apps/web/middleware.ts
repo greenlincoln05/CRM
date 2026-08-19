@@ -1,42 +1,37 @@
+import { NextResponse, type NextRequest } from 'next/server';
+
 /**
- * Route protection, active only when Clerk is configured (ADR 0004).
+ * A cheap gate in front of the counter pages.
  *
- * With keys present, every route requires sign-in — this is an internal tool
- * with no public pages, so there is no allowlist to maintain. Unauthenticated
- * page loads redirect to Clerk's hosted sign-in; unauthenticated API calls are
- * rejected (exact status to verify once a Clerk instance exists — the data
- * routes carry their own 401 regardless).
+ * This checks only that a session cookie EXISTS. It deliberately does not
+ * verify it: middleware runs on the edge runtime, where there is no database
+ * driver and no node:crypto, and a check that cannot reach app_session is not a
+ * security boundary. The real one is requireUser() in each server component,
+ * which resolves the token against the database on every request.
  *
- * This middleware is convenience, not the enforcement: NEXT_PUBLIC_* gates are
- * inlined at build time, so a keyless build ships passthrough permanently.
- * Every page and API route therefore resolves the user itself via
- * lib/auth.ts — the app stays closed even when this file is a no-op.
+ * So this is a redirect for the ordinary case - nobody signed in yet - and
+ * nothing more. A forged cookie gets past it and straight into requireUser().
  *
- * Without keys (embedded PGlite dev), the middleware is a no-op and
- * lib/auth.ts supplies the dev identity instead.
- *
- * Middleware runs on the edge runtime, which cannot read the repo-root .env
- * (no filesystem). Locally, Clerk keys therefore belong in
- * apps/web/.env.local; on Vercel they come from the project environment.
+ * API routes are not matched. Redirecting a POST to an HTML login page gives
+ * the caller a confusing 200 instead of a refusal, so those enforce their own
+ * session and answer 401 in JSON. The technician endpoints under /api/tech are
+ * likewise left alone.
  */
-import { clerkMiddleware } from '@clerk/nextjs/server';
-import { NextResponse } from 'next/server';
 
-const clerkConfigured =
-  !!process.env.CLERK_SECRET_KEY && !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+// Kept as a literal rather than imported from @lcp/db: that module pulls in the
+// database driver, which does not belong in an edge bundle.
+const SESSION_COOKIE = 'lcp_session';
 
-export default clerkConfigured
-  ? clerkMiddleware(async (auth) => {
-      await auth.protect();
-    })
-  : function passthrough() {
-      return NextResponse.next();
-    };
+export function middleware(request: NextRequest) {
+  if (request.cookies.has(SESSION_COOKIE)) return NextResponse.next();
+
+  const url = request.nextUrl.clone();
+  url.pathname = '/login';
+  // Where they were heading, so sign-in can finish the journey later.
+  url.searchParams.set('next', request.nextUrl.pathname);
+  return NextResponse.redirect(url);
+}
 
 export const config = {
-  matcher: [
-    // Everything except Next internals and static assets.
-    '/((?!_next|.*\\.(?:ico|png|jpg|jpeg|svg|css|js|map|woff2?)$).*)',
-    '/(api|trpc)(.*)',
-  ],
+  matcher: ['/', '/customers/:path*'],
 };

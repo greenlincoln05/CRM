@@ -88,3 +88,5 @@ export * from './crypto.js';
 // lists @aws-sdk/client-kms as an external package.
 
 export * from './env.js';
+export * from './auth.js';
+export * from './write/index.js';

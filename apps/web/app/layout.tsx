@@ -6,18 +6,17 @@ export const metadata: Metadata = {
   description: 'One customer. One timeline. One workflow.',
 };
 
+/**
+ * Root layout only.
+ *
+ * The counter chrome lives in (office)/layout.tsx and the technician app has
+ * its own, so this deliberately renders nothing but the document. Anything
+ * added here lands on both, including the phone in a truck bed.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>
-        <div className="shell">
-          <div className="topbar">
-            <h1>Lake Champlain Pools, Spas &amp; Stoves</h1>
-            <span className="sub">Phase 1 &middot; customers</span>
-          </div>
-          {children}
-        </div>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

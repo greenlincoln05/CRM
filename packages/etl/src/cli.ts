@@ -14,6 +14,7 @@ import { extractMssql, extractCsv, extractCsvDir } from './extract.js';
 import { transformCustomers, transformProperties, transformHistory } from './transform.js';
 import { report } from './report.js';
 import { runDemo } from './demo.js';
+import { seedJobs } from './seed-jobs.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -70,6 +71,10 @@ try {
       await runDemo();
       break;
 
+    case 'seed:jobs':
+      await seedJobs();
+      break;
+
     default:
       console.log(`Unknown command: ${command ?? '(none)'}
 
@@ -78,6 +83,7 @@ try {
   extract:csv   --entity E --file F --key K   (or --dir D --key K)
   transform     [--entity customer|property|history|all] [--limit N]
   report        [--no-write]
+  seed:jobs                    a technician and a day of work, for the mobile app
   demo                         end-to-end run on synthetic data, no server needed
 `);
       process.exitCode = 1;

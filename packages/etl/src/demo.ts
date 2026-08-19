@@ -24,6 +24,7 @@ import { config } from './config.js';
 import { protectRow } from './sensitive.js';
 import { transformCustomers, transformProperties, transformHistory } from './transform.js';
 import { report } from './report.js';
+import { seedJobs } from './seed-jobs.js';
 
 const SOURCE = config.legacy.source;
 
@@ -78,7 +79,9 @@ export async function runDemo() {
   console.log('[demo] clearing previous demo data');
   await db.execute(dsql`ALTER TABLE timeline_event DISABLE TRIGGER timeline_event_append_only_trg`);
   await db.execute(dsql`TRUNCATE timeline_event, contact, property, property_equipment,
-    customer, address, legacy_row, import_issue, import_batch RESTART IDENTITY CASCADE`);
+    customer, address, legacy_row, import_issue, import_batch,
+    work_order, work_order_task, work_order_ping, synced_action, attachment,
+    app_user RESTART IDENTITY CASCADE`);
   await db.execute(dsql`ALTER TABLE timeline_event ENABLE TRIGGER timeline_event_append_only_trg`);
 
   const br = await db.execute(dsql`
@@ -101,6 +104,10 @@ export async function runDemo() {
   await transformCustomers();
   await transformProperties();
   await transformHistory();
+
+  console.log('');
+  console.log('[demo] seeding a technician day');
+  await seedJobs();
 
   console.log('\n[demo] verifying the result\n');
   await verify();
@@ -273,6 +280,47 @@ async function verify() {
     rows(await db.execute(dsql`
       SELECT to_char(occurred_at AT TIME ZONE 'America/New_York', 'YYYY-MM-DD') AS d
       FROM timeline_event WHERE legacy_id='H-1001'`))[0]?.d === '2007-05-12');
+
+  // -- technician day -------------------------------------------------------
+
+  const dayJobs = rows(await db.execute(dsql`
+    SELECT w.number, w.status, w.priority, u.display_name AS tech
+    FROM work_order w JOIN app_user u ON u.id = w.assigned_user_id
+    WHERE w.scheduled_date = CURRENT_DATE ORDER BY w.sequence`));
+  check('a technician has a day of work scheduled', dayJobs.length === 4, `${dayJobs.length} jobs`);
+  check('jobs are assigned to one technician',
+    new Set(dayJobs.map((j: any) => j.tech)).size === 1);
+  check('checklists are attached to the jobs',
+    Number(rows(await db.execute(dsql`SELECT count(*)::int n FROM work_order_task`))[0]?.n) === 15);
+
+  // Replay safety. Networks fail after the server commits and before the
+  // response arrives, so the device WILL send the same action twice.
+  const actionId = crypto.randomUUID();
+  await db.execute(dsql`
+    INSERT INTO synced_action (client_action_id, kind, payload)
+    VALUES (${actionId}::uuid, 'job_status', '{}'::jsonb)`);
+  let replayBlocked = false;
+  try {
+    await db.execute(dsql`
+      INSERT INTO synced_action (client_action_id, kind, payload)
+      VALUES (${actionId}::uuid, 'job_status', '{}'::jsonb)`);
+  } catch { replayBlocked = true; }
+  check('a replayed action cannot be applied twice', replayBlocked);
+
+  // Same guarantee for photo uploads, which are retried far more often.
+  const job = rows(await db.execute(dsql`SELECT id, customer_id FROM work_order LIMIT 1`))[0];
+  const photoId = crypto.randomUUID();
+  await db.execute(dsql`
+    INSERT INTO attachment (customer_id, work_order_id, client_action_id, kind, storage_key, uploaded)
+    VALUES (${job.customer_id}, ${job.id}, ${photoId}::uuid, 'photo', 'test/a.jpg', true)`);
+  let dupePhotoBlocked = false;
+  try {
+    await db.execute(dsql`
+      INSERT INTO attachment (customer_id, work_order_id, client_action_id, kind, storage_key, uploaded)
+      VALUES (${job.customer_id}, ${job.id}, ${photoId}::uuid, 'photo', 'test/b.jpg', true)`);
+  } catch { dupePhotoBlocked = true; }
+  check('a retried photo upload lands once', dupePhotoBlocked);
+
 
   // Idempotency: the whole point of the design.
   const before = rows(await db.execute(dsql`SELECT count(*)::int n FROM customer`))[0].n;

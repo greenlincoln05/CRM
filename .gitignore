@@ -14,6 +14,11 @@ out/
 .env.*.local
 
 # ETL working data - NEVER commit customer data
+# Customer data: extracted Evosus records, field photos, reports.
+# Unanchored on purpose - this must match at ANY depth, not just the repo root.
+# A root-anchored rule missed apps/web/data/photos and left customer photos
+# one `git add -A` away from being committed.
+data/
 /data/
 *.csv
 *.jsonl
@@ -267,10 +272,22 @@ PublishScripts/
 *.nupkg
 # NuGet Symbol Packages
 *.snupkg
-# NOTE: the stock NuGet rule `**/[Pp]ackages/*` is deliberately ABSENT. This is
-# a Node monorepo whose source lives in /packages — that rule silently ignored
-# every new file under it, which is exactly how crypto.ts, env.ts, and
-# migration 0006 were lost from commit 56bf5be. Do not restore it.
+# The packages folder can be ignored because of Package Restore
+#
+# DISABLED for this repository. This is NuGet's restore cache rule, and it was
+# silently excluding our own packages/ workspace - every file added under
+# packages/db and packages/etl since the template was merged in ba7b71c was
+# invisible to git, including migrations. Files committed before that merge
+# stayed tracked, which is why nothing looked wrong.
+#
+# There is no .NET project here. If one ever appears, scope the rule to its
+# directory rather than restoring the repo-wide glob.
+#
+# **/[Pp]ackages/*
+# except build/, which is used as an MSBuild target.
+# !**/[Pp]ackages/build/
+# Uncomment if necessary however generally it will be regenerated when needed
+#!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files
 *.nuget.props
 *.nuget.targets
