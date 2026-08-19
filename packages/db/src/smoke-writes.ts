@@ -910,6 +910,28 @@ check('WriteError carries the field, so a message can land next to the input',
 //
 // These queries live in apps/web and cannot be imported from here, but it is
 // the SQL that matters and the SQL that would change.
+console.log(`\n── Roles ${'─'.repeat(52)}\n`);
+
+// A typo'd role does not fail closed. The dispatch gate is an allow-list, so an
+// unknown role cannot schedule — but /api/gate-code scopes on `role === 'tech'`,
+// so anything merely NOT 'tech' is treated as office and gets the unscoped
+// reveal on every property. `--role technician` would have handed over several
+// hundred houses to an account that looked correctly restricted.
+check('an unknown role is refused at account creation',
+  (await refused(() => createUser(db, {
+    email: 'typo@example.com', displayName: 'Typo', role: 'technician' as any, pin: '8261',
+  }))) !== null);
+
+check('role matching is exact, not case-insensitive',
+  (await refused(() => createUser(db, {
+    email: 'typo2@example.com', displayName: 'Typo', role: 'Tech' as any, pin: '8262',
+  }))) !== null);
+
+check('and neither attempt left an account behind',
+  Number(rows<{ n: number }>(await db.execute(sql`
+    SELECT count(*)::int AS n FROM app_user WHERE email LIKE 'typo%@example.com'
+  `))[0]!.n) === 0);
+
 console.log(`\n── ADR 0003: list views ${'─'.repeat(38)}\n`);
 
 const SENSITIVE_COLUMNS = [

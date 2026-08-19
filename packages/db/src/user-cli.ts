@@ -16,7 +16,7 @@
  */
 import { loadRepoEnv } from './env.js';
 import { createDb } from './index.js';
-import { createUser, setPin, revokeAllSessions, validatePin } from './auth.js';
+import { createUser, setPin, revokeAllSessions, validatePin, ROLES, type Role } from './auth.js';
 import { sql } from 'drizzle-orm';
 
 loadRepoEnv();
@@ -60,7 +60,9 @@ try {
       const { id } = await createUser(db, {
         email: requireArg('email'),
         displayName: requireArg('name'),
-        role: (arg('role') ?? 'staff') as 'admin' | 'manager' | 'staff' | 'tech',
+        // Not cast. createUser checks the set, and a cast here would only
+        // silence the compiler about the one input that fails open.
+        role: (arg('role') ?? 'staff') as Role,
         pin: requirePin(),
       });
       console.log(`Created ${arg('email')} (${arg('role') ?? 'staff'})  id=${id}`);
@@ -133,7 +135,7 @@ try {
     default:
       console.log(`Unknown command: ${command ?? '(none)'}
 
-  add         --email E --name N [--role admin|manager|staff|tech] [--pin P]
+  add         --email E --name N [--role ${ROLES.join('|')}] [--pin P]
   list
   pin         --email E [--pin P]
   deactivate  --email E

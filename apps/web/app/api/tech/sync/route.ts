@@ -55,7 +55,14 @@ export async function POST(request: Request) {
         const { workOrderId, status, incompleteReason } = payload ?? {};
         if (!workOrderId || !status) throw new Error('workOrderId and status required');
 
-        const valid = ['scheduled', 'en_route', 'on_site', 'complete', 'incomplete', 'cancelled'];
+        // 'cancelled' is deliberately NOT here. The PWA never offers it, but the
+        // payload is client-controlled, and calling a job off is an office
+        // decision (ADR 0010) - a technician who cannot cancel from the board
+        // must not be able to cancel by posting one. A job that cannot be done
+        // is 'incomplete' with a reason, which is the thing that generates the
+        // next visit; a cancellation says nobody is coming, and that belongs to
+        // whoever tells the customer.
+        const valid = ['scheduled', 'en_route', 'on_site', 'complete', 'incomplete'];
         if (!valid.includes(status)) throw new Error(`unknown status "${status}"`);
 
         const denied = await assertOwnsJob(db, user, workOrderId);

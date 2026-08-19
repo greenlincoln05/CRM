@@ -73,6 +73,13 @@ the write layer, so it creates jobs with no actor and no authorization. That is
 already documented as a deliberate bypass for synthetic data, and it is fine for
 exactly as long as it stays synthetic.
 
+**A technician can still extend their own reveal window.** The undated branch of
+ADR 0009's check is bounded by `updated_at`, and a technician's own status or
+notes action touches that column. Someone holding an undated, non-cancelled job
+of their own can therefore keep the two-day window open indefinitely by working
+on it. They cannot create the assignment, which is what this ADR closes, but
+they can keep one alive.
+
 **Still open, carried forward from 0009:** the photo GET is session-gated but
 not job-scoped and is cached `immutable` for a year; a cached gate code on a
 device outlives an unassignment until the next day refresh; refusals are logged

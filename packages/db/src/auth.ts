@@ -81,6 +81,16 @@ export async function verifyPinHash(pin: string, stored: string | null): Promise
 }
 
 /**
+ * The four roles, in one place.
+ *
+ * The split that matters is office versus field, not seniority: `staff` is the
+ * counter and is what a new account defaults to, `tech` is the narrower one.
+ * See ADR 0009 (who may reveal a gate code) and ADR 0010 (who may schedule).
+ */
+export const ROLES = ['admin', 'manager', 'staff', 'tech'] as const;
+export type Role = (typeof ROLES)[number];
+
+/**
  * A PIN typed on a counter keypad, so the bar is deliberately low - but not so
  * low that half the staff pick 1234. The lockout does the real work; this only
  * removes the choices that make the lockout irrelevant.
@@ -102,7 +112,7 @@ export function validatePin(pin: string): string | null {
 export type NewUser = {
   email: string;
   displayName: string;
-  role?: 'admin' | 'manager' | 'staff' | 'tech';
+  role?: Role;
   pin: string;
 };
 
@@ -117,6 +127,18 @@ export async function createUser(db: any, input: NewUser): Promise<{ id: string 
 
   const displayName = input.displayName.trim();
   if (!displayName) throw new Error('A display name is required - it is what the timeline shows.');
+
+  // A typo here does not fail closed, it fails OPEN. The dispatch gate is an
+  // allow-list, so an unknown role cannot schedule - but /api/gate-code scopes
+  // on `role === 'tech'`, so anything that is merely NOT 'tech' is treated as
+  // office and gets the unscoped reveal on every property. `--role technician`
+  // would hand out several hundred houses. So the set is checked, once, here.
+  if (input.role !== undefined && !ROLES.includes(input.role)) {
+    throw new Error(
+      `Unknown role "${input.role}". One of: ${ROLES.join(', ')}. ` +
+      `An unrecognized role is treated as office by the gate-code check.`,
+    );
+  }
 
   const pinHash = await hashPin(input.pin);
 
