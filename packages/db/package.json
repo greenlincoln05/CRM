@@ -12,9 +12,11 @@
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "studio": "drizzle-kit studio",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "key": "tsx src/keytool.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1113.0",
     "drizzle-orm": "^0.44.6",
     "postgres": "^3.4.7"
   },

@@ -18,8 +18,8 @@ This database deliberately holds the means of physical entry to several hundred 
 
 ## Known-open, and both block real technicians using this
 
-- **Authentication.** The reveal endpoint records `actorLabel: 'unauthenticated-dev'` and does not reject anonymous callers. `sensitive_access_log` is already shaped for a real user id. Until this closes, the audit log answers "someone" rather than "who," and the endpoint is an unauthenticated decrypt oracle for anyone who can reach it.
-- **Key custody.** `LCP_FIELD_KEY` must be backed up somewhere that is neither this repository nor the database backup. Stored together, the encryption bought nothing. Lost together, the gate codes are unrecoverable. `docs/adr/0005-key-custody.md` proposes an answer — KMS-wrapped with a sealed offline copy — but it is `proposed`, uncommitted, and unimplemented. Treat this as open until code exists.
+- ~~**Authentication.**~~ Closed 2026-08-18 (ADR 0004): every data surface resolves a real `app_user` server-side, the reveal writes `user_id`, and a missing or half-configured Clerk setup fails closed. The Clerk path is written but unexercised until an instance exists — check that claim before trusting it.
+- **Key custody.** The KMS wrapping of ADR 0005 is implemented and accepted. What is still open is physical: the sealed offline copy of the raw key. Nothing in code can verify it exists, so ask rather than assume — stored with the database the encryption bought nothing, lost with it the gate codes are unrecoverable. Rotation is also unwritten, which makes `key generate --force` destructive.
 
 Point 5 becomes urgent the moment photo capture ships.
 

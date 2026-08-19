@@ -19,8 +19,9 @@
  */
 import { createHash } from 'node:crypto';
 import { sql as dsql } from 'drizzle-orm';
-import { createDb, decryptField } from '@lcp/db';
+import { createDb, decryptField, initFieldKey } from '@lcp/db';
 import { config } from './config.js';
+import { protectRow } from './sensitive.js';
 import { transformCustomers, transformProperties, transformHistory } from './transform.js';
 import { report } from './report.js';
 
@@ -60,7 +61,7 @@ const HISTORY = [
 
 async function land(db: any, batchId: string, entity: string, rows: Record<string, unknown>[], key: string) {
   const values = rows.map((r) => {
-    const payload = JSON.stringify(r);
+    const payload = JSON.stringify(protectRow(r));
     return dsql`(${batchId}::uuid, ${SOURCE}, ${entity}, ${String(r[key])}, ${payload}::jsonb,
                  ${createHash('md5').update(payload).digest('hex')})`;
   });
@@ -71,6 +72,7 @@ async function land(db: any, batchId: string, entity: string, rows: Record<strin
 }
 
 export async function runDemo() {
+  await initFieldKey(); // landing encrypts gate codes, so the key comes first
   const { db, close } = await createDb();
 
   console.log('[demo] clearing previous demo data');
@@ -108,6 +110,7 @@ export async function runDemo() {
 }
 
 async function verify() {
+  await initFieldKey();
   const { db, close } = await createDb();
   const rows = (r: any) => (r.rows ?? r) as any[];
   let failures = 0;
@@ -162,6 +165,13 @@ async function verify() {
     SELECT gate_code_enc, pet_notes FROM property WHERE legacy_id='S-001'`))[0];
   check('pet notes carried to the property profile',
     gate?.pet_notes === 'Golden retriever, Moose');
+  const staged = rows(await db.execute(dsql`
+    SELECT payload FROM legacy_row WHERE entity='property' AND legacy_id='S-001'`))[0];
+  const stagedRaw = JSON.stringify(staged?.payload ?? {});
+  check('gate code is NOT in the staging table either',
+    !stagedRaw.includes('4417') && /v1:/.test(stagedRaw),
+    'legacy_row.payload holds ciphertext, not the code');
+
   check('gate code is NOT stored in plaintext',
     typeof gate?.gate_code_enc === 'string'
       && gate.gate_code_enc.startsWith('v1:')

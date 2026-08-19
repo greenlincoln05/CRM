@@ -17,6 +17,7 @@ data migration are working and tested. No UI yet — that's next.
 | Legacy transform + data quality reporting | working, 30 checks passing |
 | Web app (search, customer detail, timeline) | working |
 | Authentication (Clerk, ADR 0004) | dev identity working; Clerk path written, needs an instance to test |
+| Field key custody (KMS, ADR 0005) | implemented; needs a KMS key and the sealed offline copy |
 | Technician mobile app | not started |
 | Inventory, purchasing, POS | not started — see the roadmap |
 

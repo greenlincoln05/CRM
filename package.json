@@ -15,6 +15,7 @@
     "db:generate": "npm run generate -w @lcp/db",
     "db:migrate": "npm run migrate -w @lcp/db",
     "db:studio": "npm run studio -w @lcp/db",
-    "etl": "npm run start -w @lcp/etl"
+    "etl": "npm run start -w @lcp/etl",
+    "key": "npm run key -w @lcp/db --"
   }
 }

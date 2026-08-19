@@ -14,7 +14,7 @@
  * Wednesday. That loop is the whole migration strategy.
  */
 import { sql as dsql } from 'drizzle-orm';
-import { createDb, encryptField } from '@lcp/db';
+import { createDb, encryptField, initFieldKey } from '@lcp/db';
 import { config } from './config.js';
 import {
   cleanText, normalizePhone, normalizeEmail, normalizeZip, normalizeState,
@@ -23,6 +23,7 @@ import {
 import {
   customerMapping, propertyMapping, historyMapping, historyKindMap, pick,
 } from './mappings/evosus.js';
+import { isEncrypted, redactForIssue } from './sensitive.js';
 
 const SOURCE = config.legacy.source;
 
@@ -38,6 +39,17 @@ const SOURCE = config.legacy.source;
  */
 const BUSINESS_TZ = 'America/New_York';
 
+/**
+ * Gate codes arrive from staging already encrypted (see sensitive.ts), so the
+ * usual path is a pass-through. Encrypting here as well covers rows landed
+ * before that protection existed, and keeps this correct if a future extractor
+ * hands over cleartext.
+ */
+function protectGateCode(raw: unknown): string | null {
+  if (isEncrypted(raw)) return raw as string;
+  return encryptField(cleanText(raw));
+}
+
 type Ctx = { db: any; batchId: string; issues: number };
 
 async function recordIssue(ctx: Ctx, entity: string, legacyId: string | null, issue: Issue, payload?: unknown) {
@@ -45,7 +57,7 @@ async function recordIssue(ctx: Ctx, entity: string, legacyId: string | null, is
   await ctx.db.execute(dsql`
     INSERT INTO import_issue (batch_id, entity, legacy_id, severity, code, message, payload)
     VALUES (${ctx.batchId}, ${entity}, ${legacyId}, ${issue.severity}, ${issue.code}, ${issue.message},
-            ${payload ? JSON.stringify(payload) : null}::jsonb)
+            ${payload ? JSON.stringify(redactForIssue(payload)) : null}::jsonb)
   `);
 }
 
@@ -246,6 +258,9 @@ export async function transformCustomers(opts: { limit?: number } = {}) {
 // ── Properties ─────────────────────────────────────────────────────────────
 
 export async function transformProperties(opts: { limit?: number } = {}) {
+  // Resolve the field key before the loop: a KMS failure should stop the run
+  // here, not a thousand rows in with half the properties written.
+  await initFieldKey();
   const { db, close } = await createDb();
   const batchId = await openBatch(db, 'property', 'legacy_row -> property');
   const ctx: Ctx = { db, batchId, issues: 0 };
@@ -306,7 +321,7 @@ export async function transformProperties(opts: { limit?: number } = {}) {
         VALUES (${customer.id}, ${addressId}, ${cleanText(pick(payload, m.label!))},
                 ${cleanText(pick(payload, m.propertyType!))}, ${active},
                 ${cleanText(pick(payload, m.accessNotes!))},
-                ${encryptField(cleanText(pick(payload, m.gateCode!)))},
+                ${protectGateCode(pick(payload, m.gateCode!))},
                 ${cleanText(pick(payload, m.petNotes!))},
                 ${SOURCE}, ${legacy_id}, ${batchId})
         ON CONFLICT (legacy_source, legacy_id) WHERE legacy_id IS NOT NULL

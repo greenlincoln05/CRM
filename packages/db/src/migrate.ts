@@ -6,13 +6,39 @@
  */
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { createDb } from './index.js';
+import { createDb, loadRepoEnv } from './index.js';
+
+loadRepoEnv();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = resolve(here, '../migrations');
 
 const handle = await createDb();
 console.log(`[migrate] driver=${handle.driver} folder=${migrationsFolder}`);
+
+/**
+ * A deploy step that migrates the wrong database and exits 0 is worse than one
+ * that fails.
+ *
+ * Without DATABASE_URL this command happily creates a throwaway PGlite
+ * database in the build container, migrates that, prints "ok", and lets an
+ * unmigrated production database take traffic — the only tell being
+ * `driver=pglite` in a build log nobody reads.
+ *
+ * So: embedded is fine on a laptop (the quick start depends on it) and never
+ * fine in a deploy or CI environment.
+ */
+const deployContext =
+  process.env.VERCEL ?? process.env.CI ?? process.env.MIGRATE_REQUIRE_POSTGRES;
+
+if (handle.driver === 'pglite' && deployContext) {
+  await handle.close();
+  console.error(
+    '[migrate] REFUSED: no DATABASE_URL is set, so this would migrate an ' +
+    'embedded PGlite database instead of the real one. Set DATABASE_URL.',
+  );
+  process.exit(1);
+}
 
 try {
   if (handle.driver === 'postgres') {

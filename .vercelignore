@@ -1,0 +1,8 @@
+# Git deploys only upload committed files, but a `vercel` CLI deploy run from
+# the shop machine uploads the working directory. These must never leave the
+# building — see the non-negotiables in CLAUDE.md.
+data/
+.pgdata/
+.env
+.env.local
+node_modules

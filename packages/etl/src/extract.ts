@@ -20,6 +20,8 @@ import sql from 'mssql';
 import { sql as dsql } from 'drizzle-orm';
 import { createDb } from '@lcp/db';
 import { config, assertLegacyConfigured } from './config.js';
+import { protectRow } from './sensitive.js';
+import { initFieldKey } from '@lcp/db';
 
 function hashRow(payload: unknown): string {
   return createHash('md5').update(JSON.stringify(payload)).digest('hex');
@@ -76,10 +78,14 @@ async function landRows(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
-  const values = rows.map((r) =>
-    dsql`(${batchId}::uuid, ${config.legacy.source}, ${entity}, ${r.legacyId},
-          ${JSON.stringify(r.payload)}::jsonb, ${hashRow(r.payload)})`,
-  );
+  // Gate codes are encrypted before they touch the staging table (ADR 0005).
+  // The hash is taken over the protected payload so incremental runs stay
+  // stable — hashing the cleartext would make every row look changed.
+  const values = rows.map((r) => {
+    const payload = protectRow(r.payload);
+    return dsql`(${batchId}::uuid, ${config.legacy.source}, ${entity}, ${r.legacyId},
+          ${JSON.stringify(payload)}::jsonb, ${hashRow(payload)})`;
+  });
 
   await db.execute(dsql`
     INSERT INTO legacy_row (batch_id, source, entity, legacy_id, payload, row_hash)
@@ -100,6 +106,7 @@ export async function extractMssql(opts: {
   since?: string;
   limit?: number;
 }) {
+  await initFieldKey(); // landing encrypts gate codes
   assertLegacyConfigured();
   const { db, close } = await createDb();
   const batchId = await openBatch(db, {
@@ -240,6 +247,7 @@ export function parseCsv(text: string): Array<Record<string, string>> {
 }
 
 export async function extractCsv(opts: { entity: string; file: string; keyColumn: string }) {
+  await initFieldKey(); // landing encrypts gate codes
   const { db, close } = await createDb();
   const batchId = await openBatch(db, {
     entity: opts.entity,

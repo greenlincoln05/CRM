@@ -2,7 +2,7 @@
 export default {
   // PGlite ships WASM and postgres.js opens raw sockets: both must stay real
   // runtime requires rather than being bundled.
-  serverExternalPackages: ['@electric-sql/pglite', 'postgres'],
+  serverExternalPackages: ['@electric-sql/pglite', 'postgres', '@aws-sdk/client-kms'],
 
   // @lcp/db is TypeScript source, compiled by Next rather than pre-built.
   transpilePackages: ['@lcp/db'],

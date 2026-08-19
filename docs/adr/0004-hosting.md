@@ -63,6 +63,14 @@ quiet months.
 And it was already the assumption in `packages/db/src/index.ts`, so nothing in
 the data layer changes. `DATABASE_URL` gets set and the same code runs.
 
+One qualification added when this was implemented: point `DATABASE_URL` at
+Neon's **pooled** endpoint (the `-pooler` host). A serverless instance handles
+one request at a time, so a per-instance pool multiplied across instances is
+how a small app exhausts a connection limit. The pool defaults to one
+connection on Vercel and ten elsewhere (the ETL on the shop server is a
+long-lived process and wants the larger pool), and `prepare: false` is
+mandatory with transaction-mode pooling, not a preference.
+
 ## Consequences
 
 Five vendors instead of one machine. Each is a login, a bill, and an account

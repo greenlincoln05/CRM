@@ -85,9 +85,37 @@ The offline copy is the part most likely to be skipped, and it is the part that
 matters most on the worst day. It should be done at the same time the key is
 generated, not later.
 
+## Status of the implementation
+
+Implemented 2026-08-18. `packages/db/src/kms.ts` wraps and unwraps;
+`initFieldKey()` in `crypto.ts` resolves the key once per process and
+`apps/web/instrumentation.node.ts` calls it at startup, so a bad grant or
+region fails in the deploy logs rather than at a gate. `npm run key --
+generate` mints, wraps, self-verifies the round trip, and prints the raw key
+once — to stderr, refusing to run in CI or through a pipe, and refusing to
+overwrite an existing key without `--force`.
+
+Copies 1 and 2 are enforced by code. **Copy 3 — the sealed offline key — is a
+procedure, not a mechanism.** Nothing verifies it happened, and there is
+deliberately no command to re-print the key later. This ADR predicted it is
+the part most likely to be skipped; the tooling asks loudly and can do no more.
+
+One correction to the reasoning above, found while implementing: the claim
+that a stolen backup becomes useless was not true of this repository when it
+was written. The migration pipeline landed Evosus rows verbatim, so
+`legacy_row.payload` held every gate code in cleartext one table over from the
+encrypted column, and `import_issue.payload` copied them again on every
+data-quality finding. Both are now protected at the boundary
+(`packages/etl/src/sensitive.ts`): gate codes are encrypted before they reach
+staging, and redacted entirely from issue payloads. The demo asserts it.
+
+Rotation remains future work, and it is now load-bearing: `generate --force`
+orphans existing ciphertext because no re-encryption pass exists.
+
 ## Still open
 
-Authentication, which ADR 0003 also flags. Encrypting gate codes is most of the
-work, but the reveal endpoint still logs `unauthenticated-dev` as the actor. An
-audit log that cannot name a person is a log, not an audit. This is the first
-thing to fix and it blocks the technician app.
+Authentication was the other half of this and closed first — the reveal
+endpoint authenticates and records a real `app_user` id (ADR 0004, accepted).
+What remains here is operational, not code: create the KMS key, grant the app's
+role `kms:Decrypt` on it and nothing else, run `npm run key -- generate`, and
+seal the paper copy.

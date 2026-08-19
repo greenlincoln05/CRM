@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
-import { decryptField } from '@lcp/db';
+import { decryptField, initFieldKey } from '@lcp/db';
 import { getDb } from '@/lib/db';
 import { currentAppUser } from '@/lib/auth';
 
@@ -51,6 +51,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No gate code on file' }, { status: 404 });
   }
 
+  // Idempotent: normally a no-op because instrumentation.ts already unwrapped
+  // at startup. Kept as the backstop, and deliberately OUTSIDE the decrypt
+  // catch below — a KMS failure carries its own precise message (which grant,
+  // which region) and must not be flattened into "wrong key or tampered".
+  try {
+    await initFieldKey();
+  } catch (err: any) {
+    console.error('[gate-code] field key unavailable:', err?.message);
+    return NextResponse.json(
+      { error: 'Gate codes are unavailable — the server key is not configured.' },
+      { status: 503 },
+    );
+  }
+
   let code: string | null;
   try {
     code = decryptField(found.gate_code_enc);
@@ -58,7 +72,7 @@ export async function POST(request: Request) {
     // A failed decrypt means the wrong key or a tampered value. Both are worth
     // shouting about rather than showing the user an empty box.
     // Full detail server-side; the client does not need internal env-var names.
-    console.error('[gate-code] decrypt failed — check LCP_FIELD_KEY:', err?.message);
+    console.error('[gate-code] decrypt failed (wrong key or tampered value):', err?.message);
     return NextResponse.json(
       { error: 'Could not decrypt this code. Ask an admin to check the server key.' },
       { status: 500 },

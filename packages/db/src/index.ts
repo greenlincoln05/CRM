@@ -32,7 +32,27 @@ export async function createDb(
   const url = opts.url ?? process.env.DATABASE_URL;
 
   if (url) {
-    const client = postgres(url, { max: 10, prepare: false });
+    const client = postgres(url, {
+      /**
+       * Pool size is per process, and on Vercel a "process" is one serverless
+       * instance handling one request at a time. Ten connections each,
+       * multiplied by however many instances traffic spins up, is how a small
+       * app exhausts a Postgres connection limit. One per instance is right
+       * there; the long-lived ETL on the shop server wants the larger pool.
+       *
+       * Point DATABASE_URL at Neon's POOLED endpoint (the `-pooler` host) in
+       * production: pgbouncer fronts these and is what makes the arithmetic
+       * work at all. `prepare: false` is not optional with it — prepared
+       * statements do not survive transaction-mode pooling.
+       */
+      // `||` not `??`: DB_POOL_MAX= (empty, the shape a commented .env line
+      // becomes) parses to 0, and a zero-connection pool queues every query
+      // forever. Any falsy or non-numeric value falls back to the default.
+      max: Number(process.env.DB_POOL_MAX) || (process.env.VERCEL ? 1 : 10),
+      idle_timeout: Number(process.env.DB_IDLE_TIMEOUT) || 20,
+      connect_timeout: Number(process.env.DB_CONNECT_TIMEOUT) || 10,
+      prepare: false,
+    });
     return {
       db: drizzlePg(client, { schema }),
       driver: 'postgres',
@@ -61,4 +81,10 @@ export async function createDb(
   };
 }
 export * from './crypto.js';
+// kms.js is intentionally NOT re-exported: it is reached only through
+// crypto.js's dynamic import. At runtime under Node that means the AWS SDK is
+// never loaded unless a wrapped key is configured; under webpack it becomes a
+// lazy chunk rather than a true exclusion, which is why next.config.mjs also
+// lists @aws-sdk/client-kms as an external package.
+
 export * from './env.js';
