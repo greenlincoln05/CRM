@@ -58,6 +58,13 @@ Nothing reaches the remote unreviewed, and that is enforced rather than trusted:
 a `PreToolUse` hook blocks `git push` unless `.claude/review-state.json` records a
 review of the exact commit being pushed.
 
+The hook lives in **user settings** (`~/.claude/settings.json`, script at
+`~/.claude/hooks/review-gate.mjs`) rather than in this repo. Project settings only
+load for a session whose project root is that project, so a repo-local gate is
+silently absent whenever Claude Code is started from somewhere else — which is
+how three pushes went out unreviewed here before anyone noticed. A global gate
+has no such gap, and it covers every repository on the machine.
+
 ```
 build  →  verify  →  commit  →  repo-reviewer  →  mark  →  push
 ```
@@ -65,7 +72,7 @@ build  →  verify  →  commit  →  repo-reviewer  →  mark  →  push
 After a review is done and its findings are fixed or consciously accepted:
 
 ```bash
-node .claude/hooks/mark-reviewed.mjs repo-reviewer
+node ~/.claude/hooks/mark-reviewed.mjs repo-reviewer
 ```
 
 Add `sensitive-data-guard` as a second reviewer whenever the change touches gate
@@ -75,11 +82,21 @@ Commit again and the marker goes stale, so an amend or one-more-small-fix re-arm
 the gate. That is the intent: commit 56bf5be lost three files to a push nobody
 checked, and the repo has been paying for it since.
 
-Two honest limits. The marker is an ordinary file, so any agent that can write
-files can clear the gate without a review — this stops the accident, not a
-determined bypass. And the hook only loads in a session that started with
-`.claude/settings.json` already present, so after adding or changing it, restart
-Claude Code in this directory before trusting the gate.
+Three honest limits.
+
+1. It sees only what Claude Code runs through its shell tools. A push typed into
+   a terminal is untouched, and so is one inside a script the model merely
+   invokes.
+2. The marker is an ordinary file, so anything that can write files can clear it
+   without a review. This stops the accident, not a determined bypass.
+3. Registering the hook needs a restart — settings are read at startup. Edits to
+   the script itself take effect immediately, since it is re-executed per tool
+   call.
+
+A repository opts out with `.claude/review-gate-off`. That file can be committed,
+which would disable the gate for every clone; legitimate, but review it like
+anything else. Install and reasoning live in `tools/review-gate/` — the scripts
+are versioned there and copied to `~/.claude/hooks/`, not loaded from the repo.
 
 ## Non-negotiables
 

@@ -263,3 +263,22 @@ destructive; no cloud accounts provisioned; Evosus discovery needs credentials.
 
 **Next.** A phone write path for `incomplete_reason`; per-job scoping on
 `/api/gate-code`; resolve 0004 vs 0006; generate and seal the KMS key.
+
+**Correction to the entry above.** It credited "the gate" with catching the
+Phase 2 findings. Those came from running the `repo-reviewer` and
+`sensitive-data-guard` agents by hand; the hook itself never executed once
+during that work. It was installed in this repo's `.claude/settings.json`, and
+project settings load only for a session whose project root is that project —
+this session is rooted at the home directory, so the file was read by nothing
+and three pushes went out unreviewed while the gate appeared to be in place.
+
+Fixed by moving it to `~/.claude/settings.json`, where it covers every
+repository regardless of where a session is rooted. It first actually blocked a
+push at commit 34c4f87. Reviewing that move then turned up four more holes in
+the global version: it failed OPEN on every phrasing it could not parse
+(`pushd`, `Set-Location`, a second `cd`, cygdrive and WSL prefixes), a clean
+marker in any other repository acted as a skeleton key for this one,
+`mark-reviewed` deadlocked permanently inside a git worktree, and its own
+recovery instructions did not run in PowerShell. All closed. A gate that is
+believed while doing nothing is worse than no gate, which is the whole lesson
+of this stretch.

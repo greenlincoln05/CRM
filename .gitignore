@@ -39,7 +39,7 @@ Thumbs.db
 .pgdata/
 
 # Review-gate marker: a fact about THIS working copy at this moment, not
-# something to carry to another machine. See .claude/hooks/review-gate.mjs.
+# something to carry to another machine. See tools/review-gate/.
 .claude/review-state.json
 
 # build info

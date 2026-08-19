@@ -37,7 +37,7 @@ Skip any step the change does not touch, and say which you skipped. A CSS fix is
 
 ## The review gate — state it in every plan
 
-No change reaches a commit without `repo-reviewer`, and anything touching gate codes, access notes, photos, or PII also goes through `sensitive-data-guard`. This is enforced by a hook on `git push`, not just convention (see `.claude/hooks/review-gate.mjs`), so a plan that omits it will simply stop at the end.
+No change reaches a commit without `repo-reviewer`, and anything touching gate codes, access notes, photos, or PII also goes through `sensitive-data-guard`. This is enforced by a hook, not just convention — it lives in user settings, with a versioned copy and its reasoning in `tools/review-gate/` — so a plan that omits the review will simply stop at the end.
 
 Your last two steps are always:
 - **Review:** `repo-reviewer` (plus `sensitive-data-guard` when the change touches ADR 0003 fields)

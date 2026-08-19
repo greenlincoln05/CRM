@@ -69,7 +69,7 @@ frontend-builder built; repo-reviewer and sensitive-data-guard reviewed twice.
 Both builder agents were killed mid-task by a spend limit — frontend's work had
 landed, backend's had not, and the backend fixes were finished directly.
 
-## What the review gate caught (it earned itself)
+## What review caught (the agents, not the hook)
 
 - Migration 0010's sequence started at 1001 without moving past existing numbers,
   so the first four office bookings would collide on any database that ran the
