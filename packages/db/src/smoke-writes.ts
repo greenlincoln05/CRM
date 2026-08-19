@@ -805,7 +805,10 @@ const queriesSrc = await readFile(
   new URL('../../../apps/web/lib/queries.ts', import.meta.url), 'utf8');
 
 function queryBody(fnName: string): string {
-  const at = queriesSrc.indexOf(`export async function ${fnName}`);
+  // The open paren matters: without it a longer name defined earlier (say a
+  // `getDayScheduleCounts`) shadows the real one, and the check reads the
+  // wrong body while printing PASS.
+  const at = queriesSrc.indexOf(`export async function ${fnName}(`);
   if (at < 0) throw new Error(`${fnName} not found in queries.ts`);
   const end = queriesSrc.indexOf('\nexport ', at + 1);
   return queriesSrc.slice(at, end < 0 ? undefined : end);
@@ -817,6 +820,11 @@ for (const fn of ['getDaySchedule', 'getWorkOrders']) {
   const body = queryBody(fn).replace(
     /\(\s*p\.gate_code_enc\s+IS\s+NOT\s+NULL\s*\)\s+AS\s+has_gate_code/gi, '');
   const leaked = SENSITIVE_COLUMNS.filter((col) => body.includes(col));
+  // Guard against passing vacuously. If the SELECT is ever hoisted into a
+  // shared fragment or a const, this body contains no columns at all and the
+  // check below would pass while proving nothing.
+  check(`${fn} still has an inline SELECT for this check to read`,
+    /SELECT/i.test(body), `${body.length} chars`);
   check(`${fn} selects no sensitive property column`,
     leaked.length === 0, leaked.length ? `leaked: ${leaked.join(', ')}` : '');
 }

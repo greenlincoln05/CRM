@@ -40,9 +40,13 @@ code. Revealing is an explicit POST for one property, and the value re-hides
 after a minute — the realistic risk is a browser left open on the counter, not
 an attacker.
 
-Two list surfaces now exist and both hold that line: `getDaySchedule` behind the
-office `/schedule` board, and `/api/tech/day` for the phone. Each writes its
-SELECT list out by hand and carries only `has_gate_code`.
+Two list surfaces now exist and they are deliberately not the same. The office
+board (`getDaySchedule`) writes its SELECT list out by hand and carries only
+`has_gate_code` — it is a screen showing forty houses to someone behind a
+counter. `/api/tech/day` does carry `access_notes` and `pet_notes`, on purpose:
+it is one technician's own assigned day, and knowing about the dog before
+opening the gate is the point of the property profile. The gate code itself is
+in neither, and still comes one property at a time through the logged reveal.
 
 **The invariant is enforced on columns, and free text goes around it.** The
 office board also renders `instructions`, `work_performed` and

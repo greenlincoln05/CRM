@@ -46,7 +46,7 @@ const mikeJob = rows(await db.execute(sql`
   SELECT w.id, t.id AS task_id
   FROM work_order w
   LEFT JOIN work_order_task t ON t.work_order_id = w.id
-  WHERE w.assigned_user_id = ${mike.id}::uuid AND w.scheduled_date = CURRENT_DATE
+  WHERE w.assigned_user_id = ${mike.id}::uuid AND w.scheduled_date = (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date
   ORDER BY w.sequence LIMIT 1`))[0];
 
 if (!mikeJob) {

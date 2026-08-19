@@ -30,13 +30,14 @@ CREATE SEQUENCE work_order_number_seq START 1001;
 -- from the office each collide on a number that already exists, failing in a
 -- way that looks intermittent because the fifth one works.
 --
--- GREATEST keeps a fresh database at 1001. The regex only matches our own
+-- Two-argument setval marks the value as already used, so the floor is 1000
+-- and the first number handed out on a fresh database is 1001. The regex only matches our own
 -- W-<digits> shape, so an Evosus number in some other format is ignored
 -- rather than parsed into nonsense.
 SELECT setval(
   'work_order_number_seq',
   GREATEST(
-    1001,
+    1000,
     COALESCE((SELECT max(substring(number from '^W-([0-9]+)$')::bigint) FROM work_order), 1000)
   )
 );

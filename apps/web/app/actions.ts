@@ -1,5 +1,6 @@
 'use server';
 
+import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
@@ -69,12 +70,15 @@ async function run(
     if (err instanceof WriteError) {
       return { ok: false, error: err.message, field: err.field };
     }
-    // The message only. A driver error carries the failing statement and its
-    // parameters, which for these actions means whatever the office typed into
-    // instructions or a summary - customer detail that has no business sitting
-    // in a server log. The ref gives support something to match on.
-    const ref = Math.random().toString(36).slice(2, 8);
-    console.error(`[action] ${ref}:`, err instanceof Error ? err.message : String(err));
+    // The CAUSE, not the error. Drizzle's DrizzleQueryError.message is the
+    // failing statement with every parameter interpolated after it, which for
+    // these actions means whatever the office typed into instructions or a
+    // summary - and, on the worst day, a gate code somebody typed into a
+    // sentence. `err.cause` is the driver's own error: the Postgres message and
+    // SQLSTATE, no parameters. The ref gives support something to match on.
+    const cause = (err as { cause?: { message?: string; code?: string } } | null)?.cause;
+    const ref = randomUUID().slice(0, 6);
+    console.error(`[action] ${ref}:`, cause?.message ?? cause?.code ?? 'query failed');
     return { ok: false, error: `That could not be saved. The error has been logged (ref ${ref}).` };
   }
 }

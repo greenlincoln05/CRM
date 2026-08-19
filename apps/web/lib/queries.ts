@@ -308,11 +308,17 @@ export type ScheduledJobRow = WorkOrderRow & {
  * no access_notes, no pet_notes - `has_gate_code` is a boolean saying a code is
  * on file, which is all a "show code" button needs to know. The code itself
  * comes from /api/gate-code, one property per request, logged before it is
- * returned. /api/tech/day/route.ts holds the same line for the phone.
+ * returned. /api/tech/day/route.ts draws the line in a different place on
+ * purpose: it does carry access_notes and pet_notes, because it is one
+ * technician's own assigned day and knowing about the dog before opening the
+ * gate is the point. It carries no gate code either.
  *
- * `incomplete_reason` is surfaced because it is the thing that generates the
- * next job. The technician's phone writes it and, until this query, nothing in
- * the office read it back.
+ * `incomplete_reason` is returned because it is the thing that generates the
+ * next job. The board shows only THAT a job was left unfinished and links to
+ * the record; the technician's own words are read one customer at a time,
+ * because free text is where a gate code goes when it goes somewhere it should
+ * not. Note the write path for it is the sync endpoint, not a field on the
+ * phone yet — today it arrives only from a hand-built payload or seeded data.
  *
  * Unassigned jobs sort last as their own bucket - they are the work still
  * needing a name against it, not work belonging to a technician called NULL.
