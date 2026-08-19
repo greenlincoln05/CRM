@@ -206,3 +206,60 @@ Neon, R2, or AWS account.
 
 **Next.** Resolve 0004 vs 0006; generate the KMS key and seal the offline copy,
 with rotation written first; provision the cloud accounts; then Evosus discovery.
+
+## 2026-08-18 — Phase 2 first cut: the office can schedule jobs
+
+**Built.** Three commits: `60b2914` (the build), `36a552d` (first review round),
+`f223373` (second review round). HEAD is `f223373` = `origin/main`, clean.
+
+- Migration 0010: `work_order_number_seq`, a partial unique index on number, and
+  the `(legacy_source, legacy_id)` index `work_order` never had despite
+  non-negotiable #2
+- `packages/db/src/write/workOrders.ts` — `createWorkOrder`,
+  `rescheduleWorkOrder`, `cancelWorkOrder`. Number allocated inside the INSERT,
+  ownership checked, checklist seeded from job type, timeline event on every
+  write. 16 new write checks
+- Reads `getWorkOrders`, `getDaySchedule`, `getTechnicians` in
+  `apps/web/lib/queries.ts`
+- UI: Jobs section on the customer page, a new `/schedule` day board grouped by
+  technician with an unassigned bucket, nav link, subtitle now
+  "Phase 2 · service & dispatch"
+- `packages/etl/src/seed-jobs.ts` fixed — bare `ON CONFLICT` with no inferable
+  target, so it re-inserted every run
+
+**Agents.** First run of the orchestrator + builder roster. orchestrator planned
+and routed; schema-steward, backend-builder and frontend-builder built;
+repo-reviewer and sensitive-data-guard reviewed twice. Both builder agents were
+killed mid-task by a spend limit — frontend's work had landed, backend's had
+not, and the backend fixes were finished directly.
+
+**What review caught.** The gate earned itself. Migration 0010's sequence
+started at 1001 without moving past existing numbers, so the first four office
+bookings would collide on any database that ran the old seeder once — and the
+fix was then off by one (two-arg `setval` marks the value used), which only the
+second review caught. `CURRENT_DATE` is GMT while the board reads shop-local, so
+evening seeding landed jobs on a day the board would not show; five sites. The
+board rendered `instructions` / `work_performed` / `incomplete_reason` in full —
+free text is how a gate code typed into a sentence bypasses the encrypted column
+and lands on a list of forty addresses; the board now links instead, and both
+free-text inputs carry a warning. The first error-logging fix logged
+`err.message`, which in drizzle IS the statement plus every parameter, the exact
+leak it claimed to prevent. The new ADR 0003 regression test could pass
+vacuously two ways.
+
+**Docs.** ADR 0003's status section rewritten — points 4 and 5 were described as
+open when both are half done, and its own deferral of per-job scoping has come
+due now that dispatch exists: `/api/tech/photo` scopes to the assigned job,
+`/api/gate-code` still does not. README status table and layout corrected.
+
+**New, worth carrying.** `incomplete_reason` has no write path from the phone
+yet — TechApp has a bare "Couldn't finish" button and the field only arrives via
+the sync endpoint or seeded data. The dispatch UI for it is built ahead of its
+source.
+
+**Still open, unchanged.** ADR 0004 vs 0006 contradiction; KMS key generation and
+the sealed offline copy; key rotation unwritten, so `key generate --force` is
+destructive; no cloud accounts provisioned; Evosus discovery needs credentials.
+
+**Next.** A phone write path for `incomplete_reason`; per-job scoping on
+`/api/gate-code`; resolve 0004 vs 0006; generate and seal the KMS key.
