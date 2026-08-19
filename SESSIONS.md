@@ -87,3 +87,51 @@ real auth on the gate code reveal endpoint; run discovery against real Evosus.
 **Merged.** `docs/cloud-architecture` fast-forward merged to `main` and pushed
 (`56bf5be..d32e2bc`). The default branch builds again for a fresh clone; the
 reconstruction survives off this machine. Both branch refs point at `d32e2bc`.
+
+## 2026-08-18 — Authentication on every data surface; ADR 0004 accepted
+
+**Built.** Authentication per ADR 0004: `apps/web/lib/auth.ts`
+(`currentAppUser` — Clerk when BOTH keys set; half-configured fails closed;
+`DATABASE_URL` without Clerk fails closed; dev identity only on embedded PGlite
+and never in production builds), `apps/web/lib/require-auth.tsx` (page gate),
+`apps/web/middleware.ts` (`clerkMiddleware` when configured, passthrough
+otherwise — documented as convenience, not enforcement). Auth checks on all
+data surfaces: gate-code reveal, `/api/search`, customer page, home page. The
+gate-code route now logs a real `user_id` FK, validates uuid (400 not 500), and
+no longer names env vars to clients or embeds customer names in the append-only
+log. Migration 0007 (unique index `app_user.external_id`) generated via
+drizzle-kit with snapshot. `@clerk/nextjs` 7.7.8 added. `.env.example` and the
+README status table updated. Uncommitted at session close.
+
+**Decided.** ADR 0004 accepted (status flipped in `docs/adr/0004-hosting.md`).
+Two conditions added during review and recorded in ADRs 0003 and 0004: the
+Clerk instance must be invite-only (public sign-ups disabled — first sign-in
+auto-provisions an active staff account and any active account can reveal gate
+codes), and the reveal is deliberately role-agnostic until Phase 2 dispatch
+gives jobs to scope to.
+
+**Reviewed.** sensitive-data-guard and repo-reviewer both ran; all
+blocks-commit and breaks-production findings fixed: fail-closed originally
+covered only the reveal endpoint; half-configured keys 500ed; an unescaped dot
+in the middleware matcher let paths like `/sitemap` bypass; the invite-only
+assumption was undocumented.
+
+**Verified.** 8 runtime probes — dev reveal 200 with FK-backed log row; dev
+search 200; bad uuid 400; home 200; bogus `DATABASE_URL` with no keys: reveal
+401, search 401, home renders "Sign in required"; half-configured (secret only)
+401. `tsc` clean everywhere; production build compiles; demo 36/36; migrate
+passes through 0007 (8 migration files).
+
+**Broke.** `.pgdata` corrupted mid-session by two concurrent writers — a
+taskkill of the npm wrapper left next.js alive holding the PGlite lock, the
+CLAUDE.md single-writer gotcha exactly. Rebuilt from scratch; dev field key
+regenerated with it; synthetic data only, no loss.
+
+**Also.** Between sessions the reconstruction was committed (`d32e2bc`), merged,
+and pushed: `main` is `e8cf99f` = `origin/main` and whole again;
+`docs/cloud-architecture` is pushed too. The Clerk path itself is written but
+unexercised — no instance exists yet.
+
+**Next.** Create the invite-only Clerk instance and exercise the auth path end
+to end; decide ADR 0005 (`LCP_FIELD_KEY` custody); run discovery against real
+Evosus.

@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import GateCode from '../../GateCode';
+import { requirePageUser } from '@/lib/require-auth';
 import {
   getCustomer, getProperties, getContacts, getTimeline,
 } from '@/lib/queries';
@@ -37,6 +38,11 @@ function fmtMoney(v: unknown): string | null {
 }
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
+  // Access notes, pet notes, phones, addresses: this page is ADR-0003-adjacent
+  // even before the gate code, so it resolves the viewer before any query.
+  const { denied } = await requirePageUser();
+  if (denied) return denied;
+
   const { id } = await params;
 
   const customer = await getCustomer(id).catch(() => null);

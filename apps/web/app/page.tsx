@@ -1,9 +1,13 @@
 import CustomerSearch from './CustomerSearch';
 import { getStats } from '@/lib/queries';
+import { requirePageUser } from '@/lib/require-auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
+  const { denied } = await requirePageUser();
+  if (denied) return denied;
+
   let stats = { customers: 0, properties: 0, events: 0 };
   let error: string | null = null;
 

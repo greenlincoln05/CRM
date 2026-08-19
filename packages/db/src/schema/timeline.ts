@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, boolean, timestamp, integer, numeric, jsonb, bigserial, index,
+  pgTable, uuid, text, boolean, timestamp, integer, numeric, jsonb, bigserial, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { provenance, timestamps } from './_shared.js';
 import { customer, property } from './customer.js';
@@ -8,7 +8,7 @@ import { customer, property } from './customer.js';
 /** Employees. Auth lives with the identity provider; this is the local mirror. */
 export const appUser = pgTable('app_user', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  externalId: text('external_id'),          // id from Clerk/WorkOS
+  externalId: text('external_id'),          // id from Clerk (ADR 0004)
   email: text('email').notNull(),
   displayName: text('display_name').notNull(),
   role: text('role').notNull().default('staff'), // admin | manager | staff | tech
@@ -16,6 +16,11 @@ export const appUser = pgTable('app_user', {
   ...timestamps,
 }, (t) => [
   index('app_user_email_idx').on(t.email),
+  // The auth lookup: every authenticated request resolves external_id -> row,
+  // and provisioning upserts on it. Unique so a race cannot mint two mirrors
+  // of one Clerk user. NULLs are distinct in Postgres, so legacy/dev rows
+  // without an external id are unaffected.
+  uniqueIndex('app_user_external_id_idx').on(t.externalId),
 ]);
 
 /**

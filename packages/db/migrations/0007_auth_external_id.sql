@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "app_user_external_id_idx" ON "app_user" USING btree ("external_id");

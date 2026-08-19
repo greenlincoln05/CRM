@@ -16,6 +16,7 @@ data migration are working and tested. No UI yet — that's next.
 | Legacy extract (SQL Server + CSV) | written, CSV path tested |
 | Legacy transform + data quality reporting | working, 30 checks passing |
 | Web app (search, customer detail, timeline) | working |
+| Authentication (Clerk, ADR 0004) | dev identity working; Clerk path written, needs an instance to test |
 | Technician mobile app | not started |
 | Inventory, purchasing, POS | not started — see the roadmap |
 

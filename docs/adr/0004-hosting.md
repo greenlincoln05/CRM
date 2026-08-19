@@ -1,7 +1,7 @@
 # 0004 — Managed hosting: Vercel, Neon, R2, Clerk
 
-Status: proposed
-Date: 2026-08-18
+Status: accepted
+Date: 2026-08-18 (proposed), 2026-08-18 (accepted)
 
 ## Context
 
@@ -75,6 +75,12 @@ standard Postgres with standard extensions, and R2 speaks the S3 API. Moving to
 a VM later is a weekend, not a rewrite. The one genuinely sticky choice is
 Clerk, because user identity migrations are always unpleasant — which is the
 argument for the `app_user.external_id` indirection the schema already has.
+
+The Clerk instance must be created **invite-only**, with public sign-ups
+disabled, and stay that way. First sign-in auto-provisions an active staff
+account (`apps/web/lib/auth.ts`), and any active account can reveal gate
+codes — the sign-up switch in the Clerk dashboard is part of the security
+model, not a preference.
 
 Preview environments must never contain real customer data. They are shared by
 URL and will end up somewhere they shouldn't. The synthetic legacy dataset that
