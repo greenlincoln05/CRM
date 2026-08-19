@@ -55,7 +55,7 @@ export async function POST(request: Request) {
   // unwrapped at startup. Kept as the backstop, and deliberately OUTSIDE the
   // decrypt catch below — a KMS failure carries its own precise message (which
   // grant, which region) and must not be flattened into "wrong key or
-  // tampered". See ADR 0005.
+  // tampered". See ADR 0008.
   try {
     await initFieldKey();
   } catch (err: any) {

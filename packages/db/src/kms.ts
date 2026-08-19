@@ -1,5 +1,5 @@
 /**
- * AWS KMS envelope for the field encryption key (ADR 0005).
+ * AWS KMS envelope for the field encryption key (ADR 0008).
  *
  * The 32-byte field key is never stored anywhere in its usable form. It is
  * encrypted ("wrapped") under a KMS customer managed key, and the ciphertext
@@ -15,7 +15,7 @@
  *
  * KMS is in the path of DEPLOYMENT, not in the path of a technician standing
  * at a gate in the rain. One unwrap per process at startup; reveals are local
- * AES after that. See ADR 0005 for why per-reveal KMS calls were rejected.
+ * AES after that. See ADR 0008 for why per-reveal KMS calls were rejected.
  *
  * The SDK is imported dynamically so that development, the ETL, and any build
  * without a wrapped key never load it.

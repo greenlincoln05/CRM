@@ -1,7 +1,7 @@
 /**
  * Gate codes must not sit in cleartext anywhere, including the staging tables.
  *
- * ADR 0005 claims a stolen database backup is useless without a second,
+ * ADR 0008 claims a stolen database backup is useless without a second,
  * separate compromise. That claim was false while the migration pipeline
  * landed Evosus rows verbatim: `legacy_row.payload->>'GateCode'` returned the
  * code for every property, permanently, one table over from the encrypted

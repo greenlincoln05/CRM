@@ -18,7 +18,7 @@
  * Where the key comes from, in order (see initFieldKey below):
  *
  *   1. LCP_FIELD_KEY_WRAPPED — KMS ciphertext, unwrapped once at startup.
- *      This is production (ADR 0005).
+ *      This is production (ADR 0008).
  *   2. LCP_FIELD_KEY — raw base64. Simple, and weaker: it sits in the same
  *      dashboard as DATABASE_URL, so one account compromise yields both
  *      halves. Fine for a staging box, not for real gate codes.
@@ -58,7 +58,7 @@ let inFlight: Promise<void> | null = null;
  *      demo pipeline encrypted in a different process — so the dev key must
  *      be stable across processes, not ephemeral. Keeping it inside the
  *      gitignored PGlite directory is acceptable ONLY because dev data is
- *      synthetic; ADR 0005 governs custody of the real key.
+ *      synthetic; ADR 0008 governs custody of the real key.
  */
 /**
  * Resolve the field key, including the async KMS path, and cache it.
@@ -99,14 +99,14 @@ export async function initFieldKey(): Promise<void> {
 /**
  * Both key sources configured is not a preference to resolve quietly — it
  * means the raw key is still sitting in the deployment dashboard, which is
- * the exact condition ADR 0005 exists to eliminate. Say so.
+ * the exact condition ADR 0008 exists to eliminate. Say so.
  */
 function assertOneKeySource(): void {
   if (process.env.LCP_FIELD_KEY_WRAPPED && process.env.LCP_FIELD_KEY) {
     throw new Error(
       'Both LCP_FIELD_KEY_WRAPPED and LCP_FIELD_KEY are set. Remove the raw ' +
       'LCP_FIELD_KEY from the environment — leaving it there defeats the ' +
-      'wrapping (ADR 0005). Keep the wrapped form.',
+      'wrapping (ADR 0008). Keep the wrapped form.',
     );
   }
 }
@@ -117,7 +117,7 @@ function fieldKey(): Buffer {
   assertOneKeySource();
 
   // Checked FIRST, before the raw key. If a deployment is mid-migration to
-  // ADR 0005 and still carries both, resolving to the raw key here would let
+  // ADR 0008 and still carries both, resolving to the raw key here would let
   // the process encrypt real gate codes under the key being retired — and
   // because both resolvers early-return on the cache, whichever ran first
   // would win for the life of the process. The wrapped key is authoritative.
@@ -145,18 +145,18 @@ function fieldKey(): Buffer {
     throw new Error(
       'Neither LCP_FIELD_KEY_WRAPPED nor LCP_FIELD_KEY is set. One is required ' +
       'against a real database — the dev-key fallback exists only for embedded ' +
-      'PGlite. See .env.example and docs/adr/0005-key-custody.md.',
+      'PGlite. See .env.example and docs/adr/0008-key-custody.md.',
     );
   }
 
   // Explicit, not implied. Without DATABASE_URL the database is PGlite anyway,
   // so this is already unreachable in a real deployment — but an invariant that
   // rests on the absence of the very variable you'd worry about is worth
-  // stating outright. Same rule as the dev identity in apps/web/lib/auth.ts.
+  // stating outright.
   if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
     throw new Error(
       'Refusing to generate a development field key in a production runtime. ' +
-      'Set LCP_FIELD_KEY_WRAPPED (see docs/adr/0005-key-custody.md).',
+      'Set LCP_FIELD_KEY_WRAPPED (see docs/adr/0008-key-custody.md).',
     );
   }
 

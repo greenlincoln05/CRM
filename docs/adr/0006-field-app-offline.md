@@ -67,7 +67,8 @@ The resolution:
 - Revealing it is still an explicit action and still writes to
   `sensitive_access_log` — queued and uploaded like any other event when the
   network returns. A reveal that happened offline must still be recorded.
-- Remote wipe on a lost device comes from Clerk session revocation, which is one
+- Remote wipe on a lost device comes from server-side session revocation (ADR
+  0005 replaced the assumed Clerk session here), which is one
   of the reasons for choosing a real identity provider rather than rolling
   sessions here.
 

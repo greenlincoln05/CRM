@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Field key lifecycle (ADR 0005).
+ * Field key lifecycle (ADR 0008).
  *
  *   npm run key -w @lcp/db -- generate --key-id <kms-key-arn-or-alias>
  *   npm run key -w @lcp/db -- verify
@@ -12,7 +12,7 @@
  *
  * That third copy is the disaster copy. AWS accounts get locked out, and the
  * alternative to having it is telling several hundred customers their gate
- * codes are gone. ADR 0005 notes it is the part most likely to be skipped and
+ * codes are gone. ADR 0008 notes it is the part most likely to be skipped and
  * the part that matters most on the worst day, which is exactly why this
  * command refuses to be quiet about it.
  */
@@ -39,7 +39,7 @@ try {
 
       // The raw key is printed once. In CI or through a pipe that print lands
       // in a retained build log or a file on disk, which is every failure mode
-      // ADR 0005 is trying to avoid. Refuse rather than warn.
+      // ADR 0008 is trying to avoid. Refuse rather than warn.
       if (process.env.CI) {
         throw new Error('Refusing to run in CI: this prints a secret meant for paper only.');
       }
@@ -50,7 +50,7 @@ try {
         );
       }
       // Minting a second key orphans every existing ciphertext, and no
-      // re-encryption tool exists yet (ADR 0005 leaves rotation as future work).
+      // re-encryption tool exists yet (ADR 0008 leaves rotation as future work).
       if ((process.env.LCP_FIELD_KEY_WRAPPED || process.env.LCP_FIELD_KEY) && !flag('force')) {
         throw new Error(
           'A field key is already configured. Generating another makes every ' +
@@ -101,7 +101,7 @@ Do this before closing this terminal:
 
 If this key and the database are lost together, the gate codes for
 several hundred homes are unrecoverable. If they are stored together,
-encrypting them achieved nothing. That is the whole of ADR 0005.
+encrypting them achieved nothing. That is the whole of ADR 0008.
 =============================================================
 `);
       break;

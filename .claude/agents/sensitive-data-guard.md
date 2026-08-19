@@ -18,8 +18,8 @@ This database deliberately holds the means of physical entry to several hundred 
 
 ## Known-open, and both block real technicians using this
 
-- ~~**Authentication.**~~ Closed 2026-08-18 (ADR 0004): every data surface resolves a real `app_user` server-side, the reveal writes `user_id`, and a missing or half-configured Clerk setup fails closed. The Clerk path is written but unexercised until an instance exists — check that claim before trusting it.
-- **Key custody.** The KMS wrapping of ADR 0005 is implemented and accepted. What is still open is physical: the sealed offline copy of the raw key. Nothing in code can verify it exists, so ask rather than assume — stored with the database the encryption bought nothing, lost with it the gate codes are unrecoverable. Rotation is also unwritten, which makes `key generate --force` destructive.
+- ~~**Authentication.**~~ Closed 2026-08-18 (ADR 0005, staff auth): the reveal refuses without a session and writes a real `user_id`. Sessions are server-side and revocable; the cookie holds a token whose SHA-256 alone is stored. The reveal is role-agnostic on purpose — any active staff member can reveal any gate code, and the audit log is the control.
+- **Key custody.** The KMS wrapping of ADR 0008 is implemented and accepted. What is still open is physical: the sealed offline copy of the raw key. Nothing in code can verify it exists, so ask rather than assume — stored with the database the encryption bought nothing, lost with it the gate codes are unrecoverable. Rotation is also unwritten, which makes `key generate --force` destructive.
 
 Point 5 becomes urgent the moment photo capture ships.
 

@@ -22,7 +22,7 @@ edit records, so everything written from the app carries a name.
 | Timeline entry, pinning, manager-only redaction | working, tested |
 | Water tests with out-of-range flagging | working, tested |
 | Gate-code encryption + access log | working |
-| Field key custody (KMS, ADR 0005) | implemented; needs a KMS key and the sealed offline copy |
+| Field key custody (KMS, ADR 0008) | implemented; needs a KMS key and the sealed offline copy |
 | Work orders and checklists | minimal model, enough for the mobile app |
 | Technician PWA (offline, photos, checklists) | working |
 | Inventory, purchasing, POS | not started — see the roadmap |

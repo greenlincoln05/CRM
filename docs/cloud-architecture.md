@@ -74,7 +74,7 @@ Vercel means no build pipeline to maintain, preview deployments per branch for
 free, and no server to patch. The alternative worth naming is a single small VM
 running `next start` behind Caddy, which is cheaper and gives you somewhere to
 put cron jobs, at the cost of being a machine someone has to own. Given who
-operates this, that trade goes the other way. See ADR 0004.
+operates this, that trade goes the other way. See ADR 0007.
 
 **Database — Neon.** Already assumed in `packages/db/src/index.ts`. Serverless
 Postgres 17 with `pg_trgm` and `unaccent` available, point-in-time recovery, and
@@ -106,14 +106,17 @@ because the users are employees on shared counter machines and phones, not
 enterprise SSO tenants. It gives MFA, session management, and device revocation
 without any of it being written here.
 
-This is the single highest-priority piece of the architecture, because it is
-currently a hole. `sensitive_access_log` records `unauthenticated-dev` as the
-actor for gate code reveals. Until real authentication ships, the audit trail
-that ADR 0003 relies on does not actually identify anyone.
+**Superseded in practice, 2026-08-18.** That hole is closed, but not by Clerk:
+Sprint 2 shipped email-plus-PIN with server-side sessions (ADR 0005) because the
+write path could not wait for a provider to be bought and wired. A Clerk
+integration was written and then deleted rather than left as a second, unused
+auth system. Clerk remains the intended destination — `external_id` is still
+there for it — but nothing is wired to it today, and the cost line below is a
+future cost, not a current one.
 
 **Field encryption key — AWS KMS.** ADR 0003 leaves key custody open and flags
 the reason: stored with the database, the encryption buys nothing; lost with the
-database, the gate codes are unrecoverable. See ADR 0005 for the resolution.
+database, the gate codes are unrecoverable. See ADR 0008 for the resolution.
 
 ## Where the ETL runs
 
@@ -164,7 +167,7 @@ imported with the wrong dates" is weeks, not hours.
 
 PITR inside one provider is not a backup. Once a week, a logical dump goes to R2
 in a different account than the primary, and it is encrypted. The gate code key
-is not in it and never will be — that is the entire point of ADR 0005.
+is not in it and never will be — that is the entire point of ADR 0008.
 
 Restore gets tested twice a year, in January and in October, both outside the
 two busy seasons. An untested backup is a belief, not a backup. The test is:
@@ -259,7 +262,7 @@ In order, because the order matters:
 1. **Ship authentication.** It blocks the technician app, and until it lands the
    gate code audit log names nobody. This is the top of the list by a wide
    margin.
-2. **Resolve key custody** per ADR 0005, including the offline copy of the
+2. **Resolve key custody** per ADR 0008, including the offline copy of the
    key. Cheap to do now, unpleasant to discover later.
 3. **Stand up Neon and Vercel** with a production deploy of what already exists.
    The web app works; putting it in front of staff on real data is what turns

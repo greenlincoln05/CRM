@@ -1,4 +1,4 @@
-# 0005 — Custody of the field encryption key
+# 0008 — Custody of the field encryption key
 
 Status: accepted
 Date: 2026-08-18 (proposed), 2026-08-18 (accepted)
@@ -115,7 +115,8 @@ orphans existing ciphertext because no re-encryption pass exists.
 ## Still open
 
 Authentication was the other half of this and closed first — the reveal
-endpoint authenticates and records a real `app_user` id (ADR 0004, accepted).
+endpoint authenticates and records a real `app_user` id (ADR 0005, staff
+authentication).
 What remains here is operational, not code: create the KMS key, grant the app's
 role `kms:Decrypt` on it and nothing else, run `npm run key -- generate`, and
 seal the paper copy.

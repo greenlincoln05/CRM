@@ -1,7 +1,7 @@
 /**
  * Node-runtime startup: unwrap the field encryption key.
  *
- * This is the whole point of ADR 0005's design — KMS belongs in the path of
+ * This is the whole point of ADR 0008's design — KMS belongs in the path of
  * deployment, not in the path of a technician standing at a gate in the rain.
  * A bad region, a missing kms:Decrypt grant, or an unreachable KMS shows up
  * here, in the deploy logs before traffic, rather than as a failed reveal for

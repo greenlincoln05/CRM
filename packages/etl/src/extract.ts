@@ -78,7 +78,7 @@ async function landRows(
 ): Promise<number> {
   if (rows.length === 0) return 0;
 
-  // Gate codes are encrypted before they touch the staging table (ADR 0005).
+  // Gate codes are encrypted before they touch the staging table (ADR 0008).
   // The hash is taken over the protected payload so incremental runs stay
   // stable — hashing the cleartext would make every row look changed.
   const values = rows.map((r) => {

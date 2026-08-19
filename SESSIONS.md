@@ -142,3 +142,67 @@ app with an outbox) accepted. Decisions only — nothing implemented: the KMS
 unwrap does not exist in code, the offline copy has not been made, the mobile
 app is not started. All six ADRs are now accepted; CLAUDE.md and cross-
 references updated to match.
+
+## 2026-08-18 — Sprint 2 merged, KMS key custody, Clerk removed, ADRs renumbered
+
+**Merged.** Another session pushed Sprint 2 to `origin/main` while this branch
+worked: writable app (customers, contacts, properties, timeline, water tests),
+PIN + server-side session staff auth, work orders, offline technician PWA with
+photo sync. Merged at `869a84b`. Collisions resolved in the gate-code route,
+which keeps Sprint 2's `getSessionUser()` as the live auth plus this branch's
+KMS unwrap (503 with its own message), uuid validation (400 not 500), and a
+redacted audit reason (no customer name in an append-only table).
+`packages/db/migrations/0007_auth_external_id.sql` deleted — Sprint 2 rewrote
+the `app_user` block, dropped the `external_id` unique index from the schema,
+and its journal never carried the tag, so the file was inert and duplicated a
+migration number.
+
+**Built — cloud compliance** (before the merge, `04f43ee`). `db:migrate` now
+refuses to migrate an embedded PGlite database in a deploy/CI context instead of
+printing "ok" while production stays unmigrated. `vercel.json` runs migrations
+for production builds only, so a preview branch cannot migrate the real
+database. Serverless pool sizing for Neon's pooled endpoint is parsed so an
+empty `DB_POOL_MAX` cannot yield a zero-connection pool. `.vercelignore` keeps
+`data/` and `.pgdata/` off a CLI deploy. Verified clean: `drizzle-orm/pglite` is
+an optional peer dep, so production without PGlite is safe.
+
+**Built — key custody** (ADR 0008, was 0005). `packages/db/src/kms.ts`,
+`initFieldKey()` in `crypto.ts`, `apps/web/instrumentation.node.ts` unwraps at
+startup, and `packages/db/src/keytool.ts` (`npm run key -- generate|verify`)
+mints, wraps, and self-verifies, printing the raw key once to stderr while
+refusing CI and pipes and refusing to overwrite without `--force`.
+
+**Found.** ADR 0005's core claim was false: the ETL landed Evosus rows verbatim,
+so `legacy_row.payload` held every gate code in cleartext and
+`import_issue.payload` copied them again. `packages/etl/src/sensitive.ts` now
+encrypts at the boundary and redacts them from issue payloads; the demo asserts it.
+
+**Deleted.** The Clerk implementation — `apps/web/lib/auth.ts`,
+`apps/web/lib/require-auth.tsx`, the `@clerk/nextjs` dependency, the
+`.env.example` block. Sprint 2's PIN auth is the live system and two auth
+systems is worse than either. ADR 0007 now states plainly that Clerk is chosen
+but not implemented.
+
+**Renumbered.** The two colliding ADRs: `0004-hosting` → `0007-hosting`,
+`0005-key-custody` → `0008-key-custody`, with every reference updated per-file —
+Sprint 2 uses 0004 for mobile-platform and 0005 for staff-authentication, so
+blind replacement would have corrupted theirs. Auth attribution corrected in
+ADRs 0003, 0006, 0008, `docs/cloud-architecture.md`, and both affected agent
+files.
+
+**Verified.** `npm run typecheck` passes; `npm run smoke` passes both suites;
+etl demo 42/42; production build compiles; no ADR number collisions; no dangling
+Clerk references except the `external_id` schema comments, which are correct —
+the column stays for a future provider.
+
+**Open — needs a human.** ADR 0004 (mobile platform) and ADR 0006 (offline field
+app) reached different conclusions about the same app: 0006 chose Expo/React
+Native and explicitly rejected a PWA; Sprint 2 shipped a PWA. Two accepted ADRs
+contradict each other and the code follows one. Unresolved. Also: the KMS key
+does not exist yet and the sealed offline copy of the raw key has not been made
+(a physical act only Lincoln can do); key rotation is unwritten, which makes
+`key generate --force` destructive; and nothing is provisioned — no Vercel,
+Neon, R2, or AWS account.
+
+**Next.** Resolve 0004 vs 0006; generate the KMS key and seal the offline copy,
+with rotation written first; provision the cloud accounts; then Evosus discovery.
