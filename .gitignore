@@ -28,3 +28,6 @@ Thumbs.db
 
 # pglite dev database
 .pgdata/
+
+# build info
+*.tsbuildinfo
