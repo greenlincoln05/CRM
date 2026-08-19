@@ -19,7 +19,7 @@
  */
 import { createHash } from 'node:crypto';
 import { sql as dsql } from 'drizzle-orm';
-import { createDb } from '@lcp/db';
+import { createDb, decryptField } from '@lcp/db';
 import { config } from './config.js';
 import { transformCustomers, transformProperties, transformHistory } from './transform.js';
 import { report } from './report.js';
@@ -156,8 +156,19 @@ async function verify() {
       SELECT count(*)::int n FROM property p JOIN customer c ON c.id=p.customer_id
       WHERE c.legacy_id='14032'`))[0]?.n) === 2);
 
-  check('gate code and pet notes carried to the property profile',
-    rows(await db.execute(dsql`SELECT gate_code, pet_notes FROM property WHERE legacy_id='S-001'`))[0]?.gate_code === '4417');
+  // ADR 0003: the code is stored as ciphertext and is unreadable without the
+  // key, which the database does not hold.
+  const gate = rows(await db.execute(dsql`
+    SELECT gate_code_enc, pet_notes FROM property WHERE legacy_id='S-001'`))[0];
+  check('pet notes carried to the property profile',
+    gate?.pet_notes === 'Golden retriever, Moose');
+  check('gate code is NOT stored in plaintext',
+    typeof gate?.gate_code_enc === 'string'
+      && gate.gate_code_enc.startsWith('v1:')
+      && !gate.gate_code_enc.includes('4417'),
+    `stored as "${String(gate?.gate_code_enc).slice(0, 24)}..."`);
+  check('gate code decrypts back to the original with the key',
+    decryptField(gate?.gate_code_enc) === '4417');
 
   check('orphaned site rejected rather than silently attached',
     rows(await db.execute(dsql`SELECT id FROM property WHERE legacy_id='S-004'`)).length === 0);

@@ -58,7 +58,7 @@ export type PropertyRow = {
   property_type: string | null;
   active: boolean;
   access_notes: string | null;
-  gate_code: string | null;
+  has_gate_code: boolean;
   pet_notes: string | null;
   line1: string | null;
   city: string | null;
@@ -70,7 +70,8 @@ export async function getProperties(customerId: string): Promise<PropertyRow[]> 
   const { db } = await getDb();
   return rows<PropertyRow>(await db.execute(sql`
     SELECT p.id, p.label, p.property_type, p.active,
-           p.access_notes, p.gate_code, p.pet_notes,
+           p.access_notes, p.pet_notes,
+           (p.gate_code_enc IS NOT NULL) AS has_gate_code,
            a.line1, a.city, a.state, a.postal_code
     FROM property p
     LEFT JOIN address a ON a.id = p.address_id

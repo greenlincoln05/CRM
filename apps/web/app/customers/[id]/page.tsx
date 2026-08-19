@@ -118,8 +118,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                 )}
                 {p.access_notes && <div className="note"><b>Access</b> · {p.access_notes}</div>}
                 {p.pet_notes && <div className="note"><b>Pets</b> · {p.pet_notes}</div>}
-                {p.gate_code && (
-                  <div className="note"><b>Gate code</b> · <GateCode code={p.gate_code} /></div>
+                {p.has_gate_code && (
+                  <div className="note"><b>Gate code</b> · <GateCode propertyId={p.id} /></div>
                 )}
               </div>
             ))}

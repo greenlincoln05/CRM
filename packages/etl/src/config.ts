@@ -1,4 +1,7 @@
 import { resolve } from 'node:path';
+import { loadRepoEnv } from '@lcp/db';
+
+loadRepoEnv();
 
 /**
  * ETL configuration.

@@ -1,4 +1,6 @@
-import { createDb, type DbHandle } from '@lcp/db';
+import { createDb, loadRepoEnv, type DbHandle } from '@lcp/db';
+
+loadRepoEnv();
 
 /**
  * One database handle per process, cached across hot reloads.

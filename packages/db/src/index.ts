@@ -60,3 +60,5 @@ export async function createDb(
     close: async () => { await client.close(); },
   };
 }
+export * from './crypto.js';
+export * from './env.js';

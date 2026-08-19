@@ -1,6 +1,6 @@
 # 0003 — Sensitive field handling
 
-Status: accepted, partially implemented
+Status: accepted, implemented
 Date: 2026-08-18
 
 ## Context
@@ -25,8 +25,31 @@ Vermont and New York homes.
 
 ## Status
 
-Points 1-2 are policy, not yet enforced in code — there is no UI yet. Point 3 is
-a hard gate on the Sprint 3 mobile app and is tracked as a blocking task.
+Point 3 is done, and was done before any mobile work started. Gate codes are
+AES-256-GCM ciphertext in `property.gate_code_enc`, encrypted in the application
+(`packages/db/src/crypto.ts`) so the key never reaches Postgres as a query
+parameter and never lands in a query log. The plaintext column is dropped, not
+kept alongside.
+
+Point 2 is done: every reveal writes to `sensitive_access_log`, which is
+append-only by trigger. The log is written before the code is returned, so a
+reveal that fails to record does not succeed.
+
+Point 1 is done in the web app: the page payload carries a boolean, never the
+code. Revealing is an explicit POST for one property, and the value re-hides
+after a minute — the realistic risk is a browser left open on the counter, not
+an attacker.
+
+Points 4-5 remain open, and point 5 becomes urgent the moment photo capture
+ships.
+
+Still open, and both blocking before real technicians use this:
+- **Authentication.** The reveal endpoint currently logs `unauthenticated-dev`.
+  It must reject anonymous callers and record a real user id. The log table is
+  already shaped for it.
+- **Key custody.** `LCP_FIELD_KEY` must be backed up somewhere that is neither
+  this repository nor the database backup. Stored together, the encryption buys
+  nothing; lost together, the gate codes are unrecoverable.
 
 ## Consequences
 

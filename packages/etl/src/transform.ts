@@ -14,7 +14,7 @@
  * Wednesday. That loop is the whole migration strategy.
  */
 import { sql as dsql } from 'drizzle-orm';
-import { createDb } from '@lcp/db';
+import { createDb, encryptField } from '@lcp/db';
 import { config } from './config.js';
 import {
   cleanText, normalizePhone, normalizeEmail, normalizeZip, normalizeState,
@@ -301,17 +301,18 @@ export async function transformProperties(opts: { limit?: number } = {}) {
 
       await db.execute(dsql`
         INSERT INTO property (customer_id, address_id, label, property_type, active,
-                              access_notes, gate_code, pet_notes,
+                              access_notes, gate_code_enc, pet_notes,
                               legacy_source, legacy_id, import_batch_id)
         VALUES (${customer.id}, ${addressId}, ${cleanText(pick(payload, m.label!))},
                 ${cleanText(pick(payload, m.propertyType!))}, ${active},
-                ${cleanText(pick(payload, m.accessNotes!))}, ${cleanText(pick(payload, m.gateCode!))},
+                ${cleanText(pick(payload, m.accessNotes!))},
+                ${encryptField(cleanText(pick(payload, m.gateCode!)))},
                 ${cleanText(pick(payload, m.petNotes!))},
                 ${SOURCE}, ${legacy_id}, ${batchId})
         ON CONFLICT (legacy_source, legacy_id) WHERE legacy_id IS NOT NULL
         DO UPDATE SET address_id = EXCLUDED.address_id, label = EXCLUDED.label,
                       active = EXCLUDED.active, access_notes = EXCLUDED.access_notes,
-                      gate_code = EXCLUDED.gate_code, pet_notes = EXCLUDED.pet_notes`);
+                      gate_code_enc = EXCLUDED.gate_code_enc, pet_notes = EXCLUDED.pet_notes`);
       written++;
     }
 

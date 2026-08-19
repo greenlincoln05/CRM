@@ -122,10 +122,13 @@ export const property = pgTable('property', {
   // -- Arrival knowledge: the Sprint 3 payload -------------------------------
   accessNotes: text('access_notes'),
   /**
-   * SENSITIVE. Gate and lockbox codes. Needs column-level encryption before any
-   * non-employee access exists - see docs/adr/0003-sensitive-fields.md.
+   * SENSITIVE. Gate and lockbox codes, AES-256-GCM ciphertext.
+   *
+   * Never read this column directly. Go through decryptField() so the reveal is
+   * logged, and never let it reach a log line, an export, or an AI context
+   * window. See docs/adr/0003-sensitive-fields.md.
    */
-  gateCode: text('gate_code'),
+  gateCodeEnc: text('gate_code_enc'),
   petNotes: text('pet_notes'),
   waterShutoffNotes: text('water_shutoff_notes'),
   electricalNotes: text('electrical_notes'),

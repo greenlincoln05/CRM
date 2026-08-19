@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, boolean, timestamp, integer, numeric, jsonb, index,
+  pgTable, uuid, text, boolean, timestamp, integer, numeric, jsonb, bigserial, index,
 } from 'drizzle-orm/pg-core';
 import { provenance, timestamps } from './_shared.js';
 import { customer, property } from './customer.js';
@@ -160,3 +160,26 @@ export const waterTest = pgTable('water_test', {
 function numericCol(name: string) {
   return numeric(name, { precision: 8, scale: 2 });
 }
+
+/**
+ * Who looked at a gate code, and when.
+ *
+ * Not to catch anyone - to answer a customer asking "who had our code" with
+ * something better than a shrug. Append-only, enforced by trigger.
+ */
+export const sensitiveAccessLog = pgTable('sensitive_access_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().default(sql`now()`),
+  userId: uuid('user_id').references(() => appUser.id),
+  /** Free-text actor, for before real auth exists. */
+  actorLabel: text('actor_label'),
+  entity: text('entity').notNull(),
+  entityId: uuid('entity_id'),
+  field: text('field').notNull(),
+  reason: text('reason'),
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+}, (t) => [
+  index('sensitive_access_entity_idx').on(t.entity, t.entityId, t.occurredAt.desc()),
+  index('sensitive_access_user_idx').on(t.userId, t.occurredAt.desc()),
+]);
