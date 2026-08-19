@@ -12,8 +12,9 @@ That single fact drives everything below.
 - `docs/adr/` — why things are the way they are. All accepted: `0001` strangler
   fig, `0002` database, `0003` sensitive fields, `0004` mobile platform, `0005`
   staff authentication, `0006` field app offline, `0007` hosting, `0008` key
-  custody. Note `0004` and `0006` reach different conclusions about the same
-  app — unresolved, see `STATE.md`
+  custody, `0009` gate-code scoping (supersedes a condition in `0003`). Note
+  `0004` and `0006` reach different conclusions about the same app —
+  unresolved, see `STATE.md`
 - `docs/cloud-architecture.md` — the deployment picture the ADRs assume
 - `STATE.md` — where the work actually is right now
 - `SESSIONS.md` — the log of what happened, newest last

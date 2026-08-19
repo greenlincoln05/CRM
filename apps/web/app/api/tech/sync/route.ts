@@ -82,7 +82,16 @@ export async function POST(request: Request) {
             en_route_at  = CASE WHEN ${status} = 'en_route' THEN ${at}::timestamptz ELSE en_route_at END,
             arrived_at   = CASE WHEN ${status} = 'on_site'  THEN ${at}::timestamptz ELSE arrived_at END,
             completed_at = CASE WHEN ${status} IN ('complete','incomplete') THEN ${at}::timestamptz ELSE completed_at END,
-            incomplete_reason = COALESCE(${reason}, incomplete_reason),
+            -- Only an incomplete job carries a reason. A plain COALESCE makes
+            -- the field write-once, and nothing anywhere writes NULL to it, so
+            -- a job marked incomplete for "parts needed" and then finished the
+            -- following week would keep an amber "Left unfinished" on the
+            -- dispatch board and the customer's record forever. That field is
+            -- what generates the next job, so a stale one manufactures phantom
+            -- follow-up work.
+            incomplete_reason = CASE WHEN ${status} = 'incomplete'
+                                     THEN COALESCE(${reason}, incomplete_reason)
+                                     ELSE NULL END,
             updated_at   = now()
           WHERE id = ${workOrderId}::uuid`);
 

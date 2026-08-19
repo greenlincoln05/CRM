@@ -63,6 +63,22 @@ export async function POST(request: Request) {
   // Checked before the property is looked up, so a refusal does not also
   // answer "is there a code on file for this address".
   if (user.role === 'tech') {
+    // The window leans BACKWARD, not forward, because that is where the real
+    // need is. "Come back Thursday with the part" is the revisit the incomplete
+    // reason exists to generate, and it still carries Monday's date until
+    // somebody reschedules it - so a technician standing at that gate on
+    // Thursday needs yesterday and the day before, not next week. Forward,
+    // one day covers tomorrow's route being prepped tonight; anything further
+    // out just accumulates codes on a phone for houses nobody is visiting yet.
+    //
+    // The undated branch is bounded by updated_at rather than left open. An
+    // assigned job with no date is a real job - same-day emergencies are
+    // assigned before they are dated, and the office's own job list sorts
+    // dateless work to the top as "still waiting on somebody" - but without a
+    // bound, one job parked in March is an open-ended key to that house.
+    //
+    // CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York', never CURRENT_DATE -
+    // the server clock is GMT and CURRENT_DATE rolls over in the evening here.
     const assigned = rows(await db.execute(sql`
       SELECT 1
       FROM work_order w
@@ -70,20 +86,13 @@ export async function POST(request: Request) {
         AND w.assigned_user_id = ${user.userId}::uuid
         AND w.status <> 'cancelled'
         AND (
-          w.scheduled_date IS NULL
+          (w.scheduled_date IS NULL AND w.updated_at > now() - interval '2 days')
           OR w.scheduled_date BETWEEN
-               (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date - 1
-           AND (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date + 7
+               (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date - 2
+           AND (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date + 1
         )
       LIMIT 1`));
 
-    // The window: yesterday through next week. Wide enough that a job that ran
-    // long, got pushed a day, or is being prepped for Monday still opens the
-    // gate; narrow enough that a job from last April does not. Unscheduled work
-    // is included because an unscheduled assigned job is a real job.
-    //
-    // CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York', never CURRENT_DATE -
-    // the server clock is GMT and CURRENT_DATE rolls over in the evening here.
     if (!assigned.length) {
       // No label, no customer name, no address: this line says who asked about
       // which id, and the id is only meaningful to someone who can already
@@ -91,9 +100,13 @@ export async function POST(request: Request) {
       console.warn('[gate-code] refused — no assigned job', user.userId, propertyId);
       return NextResponse.json(
         {
+          // Deliberately does not end with "or ask to be assigned the job".
+          // That advertises the way around the check, and the two are not
+          // equivalent: reading the code aloud grants it once, an assignment
+          // grants it for days. A phone call is the fallback.
           error:
-            'That job is not assigned to you, so this gate code is not available on your phone. '
-            + 'Call the office — they can read you the code, or assign you the job.',
+            'That job is not assigned to you, so this gate code is not available. '
+            + 'Call the office and they can read it to you.',
         },
         { status: 403 },
       );

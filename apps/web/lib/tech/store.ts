@@ -156,9 +156,26 @@ function withLocalEdits(server: Job, local: Job): Job {
 export async function saveDay(jobs: Job[], tasks: Task[]) {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
-    const t = db.transaction(['jobs', 'tasks'], 'readwrite');
+    const t = db.transaction(['jobs', 'tasks', 'secrets'], 'readwrite');
     const jobStore = t.objectStore('jobs');
     const taskStore = t.objectStore('tasks');
+
+    // Drop cached gate codes for properties that are no longer on this day.
+    //
+    // The server decides whether a technician may see a code, but that decision
+    // is only consulted on the fetch - a revealed code is then held on the
+    // device until midnight. So a tech pulled off a job at ten in the morning
+    // would otherwise keep the code to that house for the rest of the day,
+    // through reloads, with nothing rechecking. Evicting here means the next
+    // day refresh takes it back, in the same transaction that takes the job.
+    const keep = new Set(jobs.map((j) => j.property_id).filter(Boolean));
+    const secretStore = t.objectStore('secrets');
+    const cached = secretStore.getAll();
+    cached.onsuccess = () => {
+      for (const s of cached.result as CachedSecret[]) {
+        if (!keep.has(s.propertyId)) secretStore.delete(s.propertyId);
+      }
+    };
 
     // Local edits that have not synced yet must survive a refresh, otherwise a
     // tech who fills in notes in a dead zone loses them the moment signal

@@ -49,8 +49,10 @@ opening the gate is the point of the property profile. The gate code itself is
 in neither, and still comes one property at a time through the logged reveal.
 
 **The invariant is enforced on columns, and free text goes around it.** The
-office board also renders `instructions`, `work_performed` and
-`incomplete_reason`, which are typed by people. A technician standing at a gate
+office board no longer renders those sentences — it shows that a job was left
+unfinished and links to the record — but `instructions`, `work_performed` and
+`incomplete_reason` are still typed by people and still land in property-linked
+rows. A technician standing at a gate
 that did not open will reasonably type "code on file didn't work, owner says
 it's now 1234" — plaintext, one table over from the encrypted column, and worse,
 `instructions` and a cancellation reason are copied verbatim into timeline
@@ -86,12 +88,12 @@ One condition of the current model, decided here:
   signup the audit trail is the control; per-job scoping (point 1's "assigned
   job" wording) arrives with dispatch, when jobs exist to scope to.
 
-  **That condition has come due.** Dispatch shipped 2026-08-19: work orders
-  carry `assigned_user_id` and a scheduled date, so there are now jobs to scope
-  to. `/api/tech/photo` already performs exactly this check — a non-supervisor
-  requesting someone else's job gets a 403 — while `/api/gate-code` remains
-  role-agnostic. The inconsistency is now visible in the code and should be
-  closed deliberately rather than left to drift.
+  **Superseded 2026-08-19 by ADR 0009.** Dispatch shipped, the condition came
+  due, and the reveal is now scoped to the technician's own jobs. The trade-offs
+  — the window, the office keeping an unscoped reveal, and why this is an
+  accident control rather than a boundary — are recorded there rather than
+  appended here. This status section stops here; later decisions get their own
+  number, as CLAUDE.md requires.
 
 Still open, and blocking before real technicians use this:
 - **Key custody.** `LCP_FIELD_KEY` must be backed up somewhere that is neither

@@ -34,6 +34,32 @@ import { createDb, loadRepoEnv, signIn, createUser, setPin, SESSION_COOKIE } fro
 loadRepoEnv();
 
 const BASE = process.env.SMOKE_BASE ?? 'http://localhost:3100';
+
+/**
+ * This suite CREATES a signed-in office account with a PIN written in this
+ * file, and the office is deliberately unscoped for gate codes — so that
+ * account can reveal the code for any property in the database. Against demo
+ * data that is a fixture. Against a real database it is a live account with
+ * published credentials and keys to several hundred houses.
+ *
+ * So it refuses to run anywhere but a local server on the embedded database. A
+ * stray DATABASE_URL in the environment, or a SMOKE_BASE left exported in a
+ * shell, is exactly how this would otherwise be pointed somewhere real without
+ * anybody deciding to.
+ */
+{
+  const host = (() => { try { return new URL(BASE).hostname; } catch { return ''; } })();
+  const local = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (!local || process.env.DATABASE_URL) {
+    console.error(
+      'Refusing to run: this suite creates a signed-in office account and is for\n' +
+      'the local demo database only.\n' +
+      `  target:       ${BASE}${local ? '' : '   <- not local'}\n` +
+      `  DATABASE_URL: ${process.env.DATABASE_URL ? 'set   <- must be unset' : 'unset'}`,
+    );
+    process.exit(1);
+  }
+}
 const rows = (r: any) => (r?.rows ?? r) as any[];
 
 let failures = 0;
@@ -73,10 +99,13 @@ async function ensureOfficeUser(db: any) {
   const existing = rows(await db.execute(sql`
     SELECT id FROM app_user WHERE lower(email) = ${OFFICE_EMAIL}`))[0];
 
+  // `role` is deliberately NOT passed: the check below asserts that a new user
+  // gets the office role by default, and passing it would only prove the insert
+  // stored what it was handed. If that default ever changes to 'tech', the
+  // counter silently becomes field-scoped and this suite must fail.
   const id: string = existing?.id ?? (await createUser(db, {
     email: OFFICE_EMAIL,
     displayName: 'Counter (smoke fixture)',
-    role: 'staff',
     pin: OFFICE_PIN,
   })).id;
 
@@ -138,6 +167,14 @@ const fixtures = await withDb(async (db) => {
 });
 
 const { mike, jess, mikeJob, office, prop, asMike, asJess, asOffice } = fixtures;
+
+/**
+ * When this run started. sensitive_access_log is append-only and never reset,
+ * so counting all-time rows would pass forever after the first run that ever
+ * logged a reveal - including if reveal logging were deleted outright. Every
+ * assertion against that table is scoped to rows written after this moment.
+ */
+const runStart = new Date().toISOString();
 
 const get = (path: string, cookie?: string) =>
   fetch(`${BASE}${path}`, { headers: cookie ? { cookie } : {} });
@@ -353,23 +390,40 @@ await withDb(async (db) => {
 
   const byMike = rows(await db.execute(sql`
     SELECT count(*)::int AS n FROM sensitive_access_log
-    WHERE entity_id = ${prop.id}::uuid AND user_id = ${mike.id}::uuid AND field = 'gate_code'`))[0];
+    WHERE entity_id = ${prop.id}::uuid AND user_id = ${mike.id}::uuid AND field = 'gate_code'
+      AND occurred_at > ${runStart}::timestamptz`))[0];
   check('the reveal is logged against a real user, not a placeholder', Number(byMike?.n) >= 1);
 
   const byOffice = rows(await db.execute(sql`
     SELECT count(*)::int AS n FROM sensitive_access_log
-    WHERE entity_id = ${prop.id}::uuid AND user_id = ${office.id}::uuid AND field = 'gate_code'`))[0];
+    WHERE entity_id = ${prop.id}::uuid AND user_id = ${office.id}::uuid AND field = 'gate_code'
+      AND occurred_at > ${runStart}::timestamptz`))[0];
   check('the office reveal is logged too', Number(byOffice?.n) >= 1);
 
   const byJess = rows(await db.execute(sql`
     SELECT count(*)::int AS n FROM sensitive_access_log
-    WHERE entity_id = ${prop.id}::uuid AND user_id = ${jess.id}::uuid`))[0];
+    WHERE entity_id = ${prop.id}::uuid AND user_id = ${jess.id}::uuid
+      AND occurred_at > ${runStart}::timestamptz`))[0];
   check('a refused reveal is not recorded as a reveal', Number(byJess?.n) === 0);
 
   const noCode = rows(await db.execute(sql`
     SELECT count(*)::int AS n FROM sensitive_access_log
     WHERE entity_id = ${prop.id}::uuid AND reason LIKE '%4417%'`))[0];
   check('the access log never quotes the code it recorded', Number(noCode?.n) === 0);
+
+  // Leave the database as close to seeded as this suite can. The office
+  // fixture is deactivated rather than deleted - sensitive_access_log rows
+  // reference it, and the log is append-only - so a signed-in account with a
+  // published PIN does not outlive the run. The demo job goes back to
+  // scheduled, because both office views key "Left unfinished" off the reason
+  // being present, and a smoke run should not leave phantom follow-up work on
+  // a dispatch board.
+  await db.execute(sql`
+    UPDATE app_user SET active = false WHERE lower(email) = ${OFFICE_EMAIL}`);
+  await db.execute(sql`
+    UPDATE work_order SET status = 'scheduled', incomplete_reason = NULL,
+                          completed_at = NULL, updated_at = now()
+     WHERE id = ${mikeJob.id}::uuid`);
 });
 
 console.log(`\n${failures === 0 ? 'ALL TECH API CHECKS PASSED' : `${failures} TECH API CHECK(S) FAILED`}`);

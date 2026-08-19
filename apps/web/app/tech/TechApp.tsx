@@ -200,7 +200,8 @@ export default function TechApp() {
         ? <JobDetail
             job={current}
             tasks={tasks.filter((t) => t.work_order_id === current.id)}
-            queuedForJob={queue.filter((a) => a.payload?.workOrderId === current.id).length}
+            queuedForJob={queue.filter(
+              (a) => a.kind === 'job_status' && a.payload?.workOrderId === current.id).length}
             onBack={() => setView({ name: 'list' })}
             onStatus={setStatus}
             onToggleTask={toggleTask}
@@ -493,6 +494,7 @@ function WhyPanel({ onCancel, onConfirm }: {
 }) {
   const [choice, setChoice] = useState<string | null>(null);
   const [detail, setDetail] = useState('');
+  const [sent, setSent] = useState(false);
 
   const reason = choice ? [choice, detail.trim()].filter(Boolean).join(' — ') : '';
 
@@ -527,8 +529,14 @@ function WhyPanel({ onCancel, onConfirm }: {
 
       <div className="t-whybar">
         <button className="t-btn" type="button" onClick={onCancel}>Back</button>
-        <button className="t-btn warn" type="button" disabled={!choice}
-                onClick={() => onConfirm(reason)}>
+        {/* Guarded against a double tap. onConfirm is deliberately not awaited,
+            so two clicks landing before the re-render would enqueue two actions
+            with different client ids — the replay dedupe is per id, so both
+            apply and both write a timeline row, into a table that is
+            append-only by trigger and can never be corrected. A wet glove on a
+            phone is exactly how that second tap happens. */}
+        <button className="t-btn warn" type="button" disabled={!choice || sent}
+                onClick={() => { if (sent) return; setSent(true); onConfirm(reason); }}>
           Mark couldn't finish
         </button>
       </div>
