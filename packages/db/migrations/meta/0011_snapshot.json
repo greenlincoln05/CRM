@@ -3500,21 +3500,6 @@
         }
       },
       "indexes": {
-        "item_barcode_code_unique_idx": {
-          "name": "item_barcode_code_unique_idx",
-          "columns": [
-            {
-              "expression": "code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "item_barcode_item_idx": {
           "name": "item_barcode_item_idx",
           "columns": [
@@ -3571,7 +3556,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "item_barcode_pack_qty_positive": {
+          "name": "item_barcode_pack_qty_positive",
+          "value": "pack_qty > 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.item_fitment": {

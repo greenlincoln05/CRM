@@ -1156,6 +1156,170 @@ for (const table of ['item', 'channel_listing']) {
 }
 
 
+console.log('\n── Finding an item at the counter ─────────────────────────\n');
+
+/**
+ * search_items() is what somebody behind the counter actually touches, and it
+ * had no executable coverage at all — the tiering it depends on ("a scan
+ * outranks a typed match") was verified once by hand and then rested on a
+ * comment. These checks are the parts that break quietly: ranking order,
+ * barcode identity across US and Canadian packaging, and two invariants that
+ * an index either enforces or does not.
+ */
+type Hit = { sku: string; score: number; matched_barcode: string | null };
+const findItems = async (q: string): Promise<Hit[]> =>
+  rows<Hit>(await db.execute(sql`SELECT sku, score, matched_barcode FROM search_items(${q}, 10)`));
+
+// A SKU with an underscore in it. SKUs have these; names do not, which is why
+// search_customers can afford to strip the character and this cannot.
+const underscored = rows<{ id: string }>(await db.execute(sql`
+  INSERT INTO item (sku, description, manufacturer, uom, legacy_source)
+  VALUES ('SP_16_00', 'Seal plate, underscore SKU', 'Hayward', 'each', 'manual')
+  RETURNING id
+`))[0]!;
+
+// The decoy: an item whose SKU is, literally, the barcode printed on another
+// item's box. Not contrived — a supplier's part number and a GTIN are both
+// digit strings, and staff paste both into the SKU field.
+await db.execute(sql`
+  INSERT INTO item (sku, description, uom, legacy_source)
+  VALUES ('0012345678905', 'Decoy: SKU that is another item''s barcode', 'each', 'manual')
+`);
+
+const underscoreHits = await findItems('SP_16_00');
+check('an underscore SKU is findable, and is the top hit',
+  underscoreHits[0]?.sku === 'SP_16_00',
+  `top hit ${underscoreHits[0]?.sku ?? '(none)'} of ${underscoreHits.length}`);
+check('and it is an exact-SKU match, not a fuzzy near-miss',
+  Number(underscoreHits[0]?.score) === 1,
+  `score ${underscoreHits[0]?.score}`);
+
+// The tier that the whole ranking rests on: an exact SKU is an identifier, a
+// description word is a guess, and they must not arrive at the same score.
+const exactSku = await findItems('SP1600Z2');
+const fuzzyWord = await findItems('seal');
+check('an exact SKU outranks any fuzzy text match',
+  Number(exactSku[0]?.score) === 1
+  && Number(fuzzyWord[0]?.score) < 1
+  && exactSku[0]?.sku === 'SP1600Z2',
+  `exact ${exactSku[0]?.score} vs fuzzy ${fuzzyWord[0]?.score}`);
+
+// A scan is unambiguous and must win. Both rows below score 1.0 — the seal on
+// its barcode, the decoy on its SKU — so this is the tiebreak, not the score.
+const scanned = await findItems('0012345678905');
+check('a barcode scan outranks a text match that scores the same',
+  scanned[0]?.sku === 'SP1600Z2' && scanned[0]?.matched_barcode === '0012345678905',
+  `top hit ${scanned[0]?.sku} (barcode ${scanned[0]?.matched_barcode ?? 'none'}), ` +
+  `then ${scanned[1]?.sku ?? '(nothing)'}`);
+
+// US box scans 12 digits, Canadian box of the same product scans 13. Vermont
+// and northern New York get both.
+const upcA = await findItems('012345678905');
+check('a 12-digit UPC-A finds the 13-digit EAN stored off the Canadian box',
+  upcA.some((h) => h.sku === 'SP1600Z2' && h.matched_barcode === '0012345678905'),
+  `hits ${upcA.map((h) => h.sku).join(', ') || '(none)'}`);
+
+// ── Invariants an index either holds or does not ───────────────────────────
+
+check('the same barcode cannot be claimed by a second item',
+  (await refused(() => db.execute(sql`
+    INSERT INTO item_barcode (item_id, code, symbology)
+    VALUES (${hose!.id}::uuid, '0012345678905', 'ean_13')
+  `))) !== null);
+
+// The finding that made this a normalized index rather than a raw one: the
+// unpadded spelling of a code that is already stored padded.
+check('nor its unpadded spelling, which is the same GTIN',
+  (await refused(() => db.execute(sql`
+    INSERT INTO item_barcode (item_id, code, symbology)
+    VALUES (${hose!.id}::uuid, '012345678905', 'upc_a')
+  `))) !== null);
+
+// ...while a genuinely different code that merely looks similar is still fine.
+check('but a different code that is not a zero-padded variant is accepted',
+  (await refused(() => db.execute(sql`
+    INSERT INTO item_barcode (item_id, code, symbology)
+    VALUES (${hose!.id}::uuid, '912345678905', 'upc_a')
+  `))) === null);
+
+check('a barcode cannot mean zero of something',
+  (await refused(() => db.execute(sql`
+    INSERT INTO item_barcode (item_id, code, pack_qty)
+    VALUES (${hose!.id}::uuid, '5550000000001', 0)
+  `))) !== null);
+
+check('nor a negative quantity, which would make a sale add stock',
+  (await refused(() => db.execute(sql`
+    INSERT INTO item_barcode (item_id, code, pack_qty)
+    VALUES (${hose!.id}::uuid, '5550000000002', -5)
+  `))) !== null);
+
+await db.execute(sql`
+  INSERT INTO item_fitment (item_id, manufacturer, model)
+  VALUES (${seal!.id}::uuid, 'Raypak', '406A')
+`);
+check('the same fitment cannot be recorded twice in different casing or padding',
+  (await refused(() => db.execute(sql`
+    INSERT INTO item_fitment (item_id, manufacturer, model)
+    VALUES (${seal!.id}::uuid, ' raypak ', '406a')
+  `))) !== null);
+
+check('a discontinued item is still findable - service history names old parts',
+  (await findItems('SP1600Z2-OLD')).some((h) => h.sku === 'SP1600Z2-OLD'));
+
+// ── The stored haystack and the query must be folded the same way ──────────
+//
+// search_items() narrows to candidates against indexed columns and only then
+// filters against a merged haystack. If those two are folded differently, the
+// narrowing throws away rows the filter would have kept, and the search simply
+// does not return an item that exists. There is no error and no empty-result
+// signal — a different, wrong part comes back instead.
+//
+// That is not hypothetical: item.search_text was `lower()` only while the
+// haystack was `lower(unaccent())`, and a search for 'trevi' returned nothing
+// for an item stored as 'Trévi'. Both spellings must work, in both directions.
+//
+// Note the shape of the near-miss that hid it. word_similarity('trevi','trévi')
+// is 0.333, just under the 0.35 threshold, so the fuzzy branch nearly rescued
+// it — while word_similarity('clementine','clémentine') is 0.571 and did
+// rescue it. The bug was therefore invisible on long words and fatal on short
+// ones, which is the opposite of what anyone would guess, and why this asserts
+// on a five-letter name.
+const accented = rows<{ id: string }>(await db.execute(sql`
+  INSERT INTO item (sku, description, manufacturer, uom, legacy_source)
+  VALUES ('TRV-001', 'Skimmer basket, Clémentine series', 'Trévi', 'each', 'manual')
+  RETURNING id
+`))[0]!;
+for (const spelling of ['trevi', 'trévi', 'Trévi', 'TREVI']) {
+  check(`an accented manufacturer is findable typed as ${JSON.stringify(spelling)}`,
+    (await findItems(spelling)).some((h) => h.sku === 'TRV-001'));
+}
+
+// Fitment is a second haystack with a second index over a second expression,
+// and it was folded differently again. "which parts fit a Trévi" is the join
+// this table exists for.
+await db.execute(sql`
+  INSERT INTO item_fitment (item_id, manufacturer, model)
+  VALUES (${seal!.id}::uuid, 'Trévi', 'Sirène 2000')
+`);
+check('a part is findable by the accented equipment it fits, typed unaccented',
+  (await findItems('sirene')).some((h) => h.sku === 'SP1600Z2'));
+
+// Case, not accents, and a different column again: CODE_128 is arbitrary
+// alphanumeric and vendors write it in capitals. The query is lowercased
+// before it reaches the candidate scan, so an index over the raw column is
+// probed with a pattern that cannot match it. Nobody types a barcode in the
+// case it was printed in.
+await db.execute(sql`
+  INSERT INTO item_barcode (item_id, code, symbology)
+  VALUES (${accented.id}::uuid, 'VND-AB12-XY', 'code_128')
+`);
+for (const spelling of ['VND-AB12', 'vnd-ab12']) {
+  check(`a partial CODE_128 is findable typed as ${JSON.stringify(spelling)}`,
+    (await findItems(spelling)).some((h) => h.sku === 'TRV-001'));
+}
+
+
 console.log('\n── Every write carries a name ─────────────────────────────\n');
 
 const unattributed = rows<{ n: number }>(await db.execute(sql`

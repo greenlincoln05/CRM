@@ -183,26 +183,43 @@ export async function listItemOnChannel(
 
   const existing = await loadListing(db, port.channel, itemId);
 
-  if (existing) {
-    await db.execute(sql`
-      UPDATE channel_listing
-         SET external_id = ${externalId},
-             external_handle = ${externalHandle},
-             listed = true,
-             last_pushed_at = now()
-       WHERE id = ${existing.id}::uuid
-    `);
-    return { listingId: existing.id, externalId, created: false };
-  }
-
-  // Friendly message first. The index is the guarantee — two terminals can
-  // both pass this SELECT before either commits — so the insert is wrapped as
-  // well, and both paths produce the same sentence.
+  // Checked BEFORE the branch, not inside the insert path.
+  //
+  // A re-list can collide too: an adapter that starts handing back an external
+  // id another item already holds hits the same unique index on the UPDATE.
+  // That branch used to have neither this pre-flight nor the catch below, so
+  // the promise one paragraph up — one external id, one item, always — held
+  // only for new listings, and a re-list surfaced a raw driver error with the
+  // failing statement in it instead of a sentence somebody could act on.
+  //
+  // Friendly message first; the index is still the guarantee, since two
+  // terminals can both pass this SELECT before either commits.
   const claimedBy = rows<{ item_id: string }>(await db.execute(sql`
     SELECT item_id FROM channel_listing
      WHERE channel = ${port.channel} AND external_id = ${externalId}
   `))[0];
-  if (claimedBy) throw alreadyClaimed(port.channel, externalId);
+  if (claimedBy && claimedBy.item_id !== itemId) {
+    throw alreadyClaimed(port.channel, externalId);
+  }
+
+  if (existing) {
+    try {
+      await db.execute(sql`
+        UPDATE channel_listing
+           SET external_id = ${externalId},
+               external_handle = ${externalHandle},
+               listed = true,
+               last_pushed_at = now()
+         WHERE id = ${existing.id}::uuid
+      `);
+    } catch (err) {
+      if (isUniqueViolation(err, 'channel_listing_external_unique_idx')) {
+        throw alreadyClaimed(port.channel, externalId);
+      }
+      throw err;
+    }
+    return { listingId: existing.id, externalId, created: false };
+  }
 
   try {
     const created = rows<{ id: string }>(await db.execute(sql`
@@ -464,10 +481,21 @@ async function recordIssue(
   db: Db, batchId: string, legacyId: string,
   message: string, payload: unknown,
 ): Promise<void> {
+  // Only the line, never the order. An import_issue payload is a triage
+  // artefact - the report gets read and pasted around, which is why the ETL
+  // strips gate codes from its own issue payloads. A pulled order carries
+  // customerEmail and customerName, and the next unit is the one that matches
+  // those to a customer, so the shape that must never reach here is the whole
+  // order. What a person triaging an unmapped listing needs is the external id
+  // and what the channel called it.
+  const safe = payload && typeof payload === 'object'
+    ? (({ externalId, description, quantity }: any) => ({ externalId, description, quantity }))(payload as any)
+    : payload;
+
   await db.execute(sql`
     INSERT INTO import_issue (batch_id, entity, legacy_id, severity, code, message, payload)
     VALUES (${batchId}::uuid, 'channel_order', ${legacyId}, 'error',
             'UNKNOWN_CHANNEL_LISTING', ${message},
-            ${JSON.stringify(payload)}::jsonb)
+            ${JSON.stringify(safe)}::jsonb)
   `);
 }

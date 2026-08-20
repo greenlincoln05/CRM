@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   pgTable, uuid, text, boolean, numeric, timestamp,
-  index, uniqueIndex,
+  index, uniqueIndex, check,
 } from 'drizzle-orm/pg-core';
 import { provenance, timestamps } from './_shared.js';
 
@@ -113,22 +113,25 @@ export const itemBarcode = pgTable('item_barcode', {
   itemId: uuid('item_id').notNull().references(() => item.id, { onDelete: 'cascade' }),
 
   /**
-   * The scanned digits, STORED NORMALIZED to 13 characters where the symbology
-   * allows it.
+   * The scanned code, as it arrived.
    *
    * A US box carries UPC-A (12 digits) and the Canadian box of the same
    * product carries EAN-13. They are the same number: UPC-A is EAN-13 with a
-   * leading zero. Left-pad the zero and both scans land on one row instead of
-   * creating a phantom second item that then holds its own stock.
+   * leading zero, which is GS1's own rule — every GTIN is the same value
+   * right-aligned in a wider field.
    *
-   * The normalization itself belongs in the write layer of a later unit (the
-   * function that accepts a scan), not in a database default — it depends on
-   * symbology and has to reject malformed input rather than pad it silently.
-   * The column is shaped for it: plain text, wide enough for CODE_128 which is
-   * not numeric at all, unique across every item so one physical barcode can
-   * never point at two products. search_items() already matches a 12-digit
-   * scan against a stored 13-digit code, so the read side works before the
-   * write side lands.
+   * Uniqueness is therefore enforced on the NORMALIZED form, not on this raw
+   * column: `item_barcode_code_unique_idx` in migration 0011 is a unique index
+   * over `barcode_norm(code)`. A raw-column unique index does not hold for the
+   * exact case this table exists for — with '0012345678905' already stored,
+   * inserting '012345678905' against a different item would be accepted, and
+   * one scan would then return two items. The normalized index refuses it.
+   *
+   * Formatting a code on the way IN still belongs in the write layer of a
+   * later unit (it depends on symbology and must reject malformed input rather
+   * than pad it silently). The database no longer depends on that happening:
+   * search_items() matches through barcode_norm() as well, so a 12-digit scan
+   * finds a 13-digit stored code and vice versa.
    */
   code: text('code').notNull(),
 
@@ -146,12 +149,22 @@ export const itemBarcode = pgTable('item_barcode', {
   ...provenance,
   ...timestamps,
 }, (t) => [
-  // One physical barcode, one item. This is the whole point of the table.
-  uniqueIndex('item_barcode_code_unique_idx').on(t.code),
+  // One physical barcode, one item — but enforced on barcode_norm(code), so
+  // the index lives in migration 0011 rather than here. Drizzle cannot express
+  // an expression index, and a raw-column unique index would be a weaker rule
+  // wearing the same name. See the comment on `code`.
   index('item_barcode_item_idx').on(t.itemId),
   uniqueIndex('item_barcode_legacy_key_idx')
     .on(t.legacySource, t.legacyId)
     .where(sql`legacy_id IS NOT NULL`),
+
+  /**
+   * A barcode that means zero of something is a scan that does nothing, and a
+   * negative one is a sale that ADDS stock. Both are silent: the movement
+   * layer in a later unit multiplies by this, so the wrong sign shows up as a
+   * count that drifts, not as an error. One line now; a table lock later.
+   */
+  check('item_barcode_pack_qty_positive', sql`pack_qty > 0`),
 ]);
 
 /**
@@ -175,10 +188,11 @@ export const itemBarcode = pgTable('item_barcode', {
  *     item -> item_fitment -> property_equipment -> property -> customer
  *
  * The join is on free text, which is loose. That is honest about the data:
- * twenty years of Evosus equipment records spell "Hayward" four ways. The
- * unique index below normalizes case and surrounding whitespace so the same
- * fitment is not recorded twice; matching across the two tables is a query
- * concern for the unit that builds those screens.
+ * twenty years of Evosus equipment records spell "Hayward" four ways.
+ * `item_fitment_unique_idx` — in migration 0011, not in this file, because
+ * Drizzle cannot express an expression index — normalizes case and surrounding
+ * whitespace so the same fitment is not recorded twice. Matching across the
+ * two tables is a query concern for the unit that builds those screens.
  */
 export const itemFitment = pgTable('item_fitment', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
