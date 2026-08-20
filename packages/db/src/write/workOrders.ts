@@ -286,6 +286,11 @@ async function assigneeName(db: Db, userId: string): Promise<string> {
  * Returns the timeline line for an override, null when the job simply fits.
  * Throws the refusal otherwise — with the arithmetic in it, because "the day
  * is full" invites an argument and "480 of 480, this adds 30" does not.
+ *
+ * Checked before the transaction, not inside it: on real Postgres two
+ * dispatchers could in principle both pass and overbook a day (PGlite is
+ * single-writer, so the demo cannot race). Accepted for a two-dispatcher
+ * shop; a production port wants this sum re-checked inside the transaction.
  */
 async function assertCapacity(
   db: Db,

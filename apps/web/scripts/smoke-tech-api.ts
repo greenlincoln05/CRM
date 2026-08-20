@@ -446,6 +446,9 @@ check('the office reads any photo, uncontested', officeGet.status === 200);
 check('and keeps the immutable cache — office access does not expire',
   (officeGet.headers.get('cache-control') ?? '').includes('immutable'));
 
+check('a malformed photo id is a 400, not a 500 out of ::uuid',
+  (await get('/api/tech/photo?id=not-a-uuid', asMike)).status === 400);
+
 // ── what only the database can answer ──────────────────────────────────────
 
 // The second and last database phase: the timeline row, the ping, and the

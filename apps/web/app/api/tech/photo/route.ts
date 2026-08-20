@@ -124,7 +124,11 @@ export async function GET(request: Request) {
   }
 
   const id = new URL(request.url).searchParams.get('id');
-  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+  // Validate shape here so a malformed id is a 400, not a 500 out of ::uuid —
+  // same rule and same regex as the gate-code reveal one route over.
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: 'id (uuid) required' }, { status: 400 });
+  }
 
   const { db } = await getDb();
   const rows = (r: any) => (r?.rows ?? r) as any[];
