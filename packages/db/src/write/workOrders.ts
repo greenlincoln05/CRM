@@ -55,6 +55,16 @@ export const WORK_ORDER_STATUSES = [
 
 export const WORK_ORDER_PRIORITIES = ['low', 'normal', 'urgent'] as const;
 
+/**
+ * What a job with no estimate is assumed to occupy. A single number rather
+ * than per-type guesses: the office fills in estimated_minutes when it
+ * matters, and an unestimated job blocking exactly one hour is legible in a
+ * way a lookup table is not. The day board shows the same arithmetic
+ * (apps/web/app/(office)/schedule/page.tsx), so keep the two importing this
+ * one constant rather than agreeing by coincidence.
+ */
+export const DEFAULT_JOB_MINUTES = 60;
+
 export type WorkOrderType = typeof WORK_ORDER_TYPES[number];
 export type WorkOrderStatus = typeof WORK_ORDER_STATUSES[number];
 export type WorkOrderPriority = typeof WORK_ORDER_PRIORITIES[number];
@@ -197,6 +207,8 @@ export type WorkOrderInput = {
   instructions?: string | null;
   /** Overrides the type's template. Omit to get the template. */
   tasks?: readonly string[] | null;
+  /** The office saw the full day and booked anyway. Recorded on the timeline. */
+  overrideCapacity?: boolean;
 };
 
 export type RescheduleInput = {
@@ -205,6 +217,8 @@ export type RescheduleInput = {
   scheduledWindow?: string | null;
   assignedUserId?: string | null;
   sequence?: number | string | null;
+  /** The office saw the full day and booked anyway. Recorded on the timeline. */
+  overrideCapacity?: boolean;
 };
 
 export type CancelInput = {
@@ -256,6 +270,63 @@ async function assigneeName(db: Db, userId: string): Promise<string> {
     throw new WriteError('That technician could not be found.', 'assignedUserId');
   }
   return found.display_name;
+}
+
+/**
+ * CORE.md: "Cannot block overbooked service days." Now it can.
+ *
+ * The day is a minutes budget per person (app_user.daily_capacity_minutes),
+ * not a job count, and the guard lives here rather than in the form so that
+ * every caller — the customer page, the board, whatever Sprint 4 builds —
+ * gets it for free. It is a business guard, not authorization: any dispatch
+ * role may book past it by saying so (`overrideCapacity`), because in a real
+ * June somebody will have to, and the honest design records the decision on
+ * the timeline instead of pretending the ceiling is never broken.
+ *
+ * Returns the timeline line for an override, null when the job simply fits.
+ * Throws the refusal otherwise — with the arithmetic in it, because "the day
+ * is full" invites an argument and "480 of 480, this adds 30" does not.
+ */
+async function assertCapacity(
+  db: Db,
+  assignedUserId: string,
+  date: string,
+  addMinutes: number,
+  opts: { override: boolean; excludeWorkOrderId?: string | null },
+): Promise<string | null> {
+  const load = rows<{ name: string; capacity: number; minutes: number }>(await db.execute(sql`
+    -- FILTER, not a bare SUM: a LEFT JOIN with no matching work_order still
+    -- returns one row of NULLs, and an unfiltered COALESCE(w.estimated_minutes,
+    -- DEFAULT_JOB_MINUTES) would count that phantom row as one default-length
+    -- job - every person with an empty day would appear to already have an
+    -- hour on it.
+    SELECT u.display_name AS name,
+           u.daily_capacity_minutes AS capacity,
+           COALESCE(SUM(COALESCE(w.estimated_minutes, ${DEFAULT_JOB_MINUTES}))
+             FILTER (WHERE w.id IS NOT NULL), 0)::int AS minutes
+      FROM app_user u
+      LEFT JOIN work_order w
+        ON w.assigned_user_id = u.id
+       AND w.scheduled_date = ${date}::date
+       AND w.status <> 'cancelled'
+       AND w.id IS DISTINCT FROM ${opts.excludeWorkOrderId ?? null}::uuid
+     WHERE u.id = ${assignedUserId}::uuid
+     GROUP BY u.display_name, u.daily_capacity_minutes
+  `))[0];
+  if (!load) return null; // an unknown assignee is assigneeName()'s refusal, not this one
+
+  const total = load.minutes + addMinutes;
+  if (total <= load.capacity) return null;
+
+  if (!opts.override) {
+    throw new WriteError(
+      `${load.name} already has ${load.minutes} of ${load.capacity} minutes on ${date}; `
+      + `this job's ${addMinutes} would make ${total}. Pick another day, another person, `
+      + `or tick "Book anyway".`,
+      'scheduledDate',
+    );
+  }
+  return `Booked over capacity: ${total} of ${load.capacity} minutes for ${load.name} on ${date}.`;
 }
 
 /**
@@ -361,6 +432,15 @@ export async function createWorkOrder(
     assignee = await assigneeName(db, assignedUserId);
   }
 
+  // An unassigned or undated job blocks nobody's day; the check waits until
+  // both facts exist.
+  let capacityNote: string | null = null;
+  if (assignedUserId && date) {
+    capacityNote = await assertCapacity(db, assignedUserId, date,
+      estimatedMinutes ?? DEFAULT_JOB_MINUTES,
+      { override: input.overrideCapacity === true });
+  }
+
   const labels = checklist(input, type);
 
   return db.transaction(async (tx: Db) => {
@@ -389,6 +469,7 @@ export async function createWorkOrder(
         scheduleLine({ scheduledDate: date, scheduledWindow: window, assignee }),
         priority !== 'normal' ? `Priority: ${priority}` : null,
         instructions,
+        capacityNote,
       ].filter(Boolean).join('\n') || null,
       refType: 'work_order',
       refId: created.id,
@@ -418,6 +499,7 @@ type WorkOrderRow = {
   summary: string | null;
   scheduled_date: string | null;
   scheduled_window: string | null;
+  estimated_minutes: number | null;
   sequence: number | null;
   assigned_user_id: string | null;
   assignee_name: string | null;
@@ -431,7 +513,7 @@ async function loadWorkOrder(db: Db, workOrderId: string): Promise<WorkOrderRow>
     -- "2026-05-06" reads as a change on every save.
     SELECT w.id, w.number, w.customer_id, w.property_id, w.status, w.summary,
            w.scheduled_date::text AS scheduled_date,
-           w.scheduled_window, w.sequence, w.assigned_user_id,
+           w.scheduled_window, w.estimated_minutes, w.sequence, w.assigned_user_id,
            u.display_name AS assignee_name
       FROM work_order w
       LEFT JOIN app_user u ON u.id = w.assigned_user_id
@@ -491,6 +573,17 @@ export async function rescheduleWorkOrder(
   // Opening the dispatch form to read it is not a reschedule.
   if (changes.length === 0) return { id: before.id, changes };
 
+  // Re-checked only when the day or the person changes: a window edit on a
+  // deliberately overloaded day must not re-refuse a decision already made.
+  const dayChanged = date !== before.scheduled_date
+    || assignedUserId !== before.assigned_user_id;
+  let capacityNote: string | null = null;
+  if (dayChanged && assignedUserId && date) {
+    capacityNote = await assertCapacity(db, assignedUserId, date,
+      before.estimated_minutes ?? DEFAULT_JOB_MINUTES,
+      { override: input.overrideCapacity === true, excludeWorkOrderId: before.id });
+  }
+
   return db.transaction(async (tx: Db) => {
     await tx.execute(sql`
       UPDATE work_order
@@ -509,6 +602,7 @@ export async function rescheduleWorkOrder(
       body: [
         changes.join('\n'),
         scheduleLine({ scheduledDate: date, scheduledWindow: window, assignee }),
+        capacityNote,
       ].filter(Boolean).join('\n\n'),
       refType: 'work_order',
       refId: before.id,
