@@ -381,3 +381,24 @@ export async function getTechnicians(): Promise<TechnicianRow[]> {
      ORDER BY (role <> 'tech'), display_name
   `));
 }
+
+export type StaffRow = {
+  display_name: string;
+  role: string;
+  active: boolean;
+};
+
+/**
+ * The roster for /settings/staff. Names, roles, active flags — nothing
+ * else. No emails and no auth columns: this page is read-only on purpose
+ * (ADR 0005: an admin screen is a login page nobody guards), so it gets
+ * only what a person needs to see who works here.
+ */
+export async function listStaff(): Promise<StaffRow[]> {
+  const { db } = await getDb();
+  return rows<StaffRow>(await db.execute(sql`
+    SELECT display_name, role, active
+      FROM app_user
+     ORDER BY active DESC, (role <> 'tech'), display_name
+  `));
+}
