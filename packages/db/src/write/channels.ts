@@ -393,34 +393,55 @@ export async function pullChannelOrders(
 
       for (const line of order.lines) {
         lines++;
+
+        // Coerced BEFORE the lookup, not just before the issue row.
+        //
+        // `external_id` is a text column, so binding a non-string makes the
+        // driver refuse the statement — and that exception escapes this loop,
+        // fails the batch, and abandons the other thirty-nine orders. Bad data
+        // from a channel would then be an exception rather than an
+        // import_issue row, which is non-negotiable #3 turned exactly inside
+        // out, in the function whose header argues at length for the opposite.
+        // The port types this `string`, but types are erased and a real
+        // adapter deserialising vendor JSON is not bound by them.
+        const clip = (v: unknown, n: number) =>
+          typeof v === 'string' ? v.slice(0, n) : null;
+        const lineRef = clip(line.externalId, 80) ?? '(no listing id)';
+
         const match = rows<{ listing_id: string; item_id: string; sku: string }>(
           await db.execute(sql`
             SELECT cl.id AS listing_id, i.id AS item_id, i.sku
               FROM channel_listing cl
               JOIN item i ON i.id = cl.item_id
-             WHERE cl.channel = ${port.channel} AND cl.external_id = ${line.externalId}
+             WHERE cl.channel = ${port.channel} AND cl.external_id = ${lineRef}
           `))[0];
 
         if (!match) {
           orderIsClean = false;
           problems++;
-          // The description is coerced and clipped HERE as well as in
-          // recordIssue, and the duplication is deliberate: unlike the
-          // payload, import_issue.message is rendered into the markdown
-          // triage report (etl/src/report.ts), so it is the more exposed of
-          // the two and must not inherit whatever the adapter put in this
-          // field. Same reasoning as the payload - see recordIssue below.
-          const label = typeof line.description === 'string'
-            ? line.description.slice(0, 120)
-            : null;
-          await recordIssue(db, batchId, line.externalId,
-            `Order ${order.externalOrderId} names ${port.channel} listing ` +
-            `"${line.externalId}"${label ? ` (${label})` : ''}, ` +
+          // Everything adapter-controlled is coerced and clipped HERE as well
+          // as in recordIssue, and the duplication is deliberate: unlike the
+          // payload, import_issue.message is rendered into the markdown triage
+          // report (etl/src/report.ts), so it is the more exposed of the two
+          // and must not inherit whatever the adapter put in these fields.
+          //
+          // The two IDS are clipped as well as the description, which reads
+          // like paranoia about a field whose whole purpose is to be pasted
+          // into a vendor admin. It is not. A Shopify custom line item has no
+          // product id, so an adapter substitutes the line title - and the
+          // title is exactly where personalisation text, and therefore a
+          // customer's name, ends up. Recording an identifier is the point;
+          // recording 600 characters of one is not.
+          const orderRef = clip(order.externalOrderId, 80) ?? '(no order id)';
+          const label = clip(line.description, 120);
+          await recordIssue(db, batchId, lineRef,
+            `Order ${orderRef} names ${port.channel} listing ` +
+            `"${lineRef}"${label ? ` (${label})` : ''}, ` +
             'which is not mapped to any item.',
             {
-              externalOrderId: order.externalOrderId,
-              externalId: line.externalId,
-              description: line.description ?? null,
+              externalOrderId: orderRef,
+              externalId: lineRef,
+              description: label,
               quantity: line.quantity,
             });
           continue;

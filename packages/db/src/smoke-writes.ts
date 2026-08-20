@@ -394,7 +394,7 @@ const mainHouse = await addProperty(db, manager, created.id, {
   label: 'Main house', propertyType: 'pool', isPrimary: true,
   accessNotes: 'Gate on the left side of the garage.',
   petNotes: 'Golden retriever, Moose',
-  gateCode: '4417',
+  gateCode: '4417#',
   address: { line1: '42 Lakeview Rd', city: 'Colchester', state: 'VT', postalCode: '05446' },
 });
 
@@ -403,9 +403,9 @@ const propRow = rows<{ gate_code_enc: string; pet_notes: string }>(await db.exec
 `))[0]!;
 
 check('a gate code typed at the counter is ciphertext by the time it lands',
-  propRow.gate_code_enc.startsWith('v1:') && !propRow.gate_code_enc.includes('4417'),
+  propRow.gate_code_enc.startsWith('v1:') && !propRow.gate_code_enc.includes('4417#'),
   `stored as "${propRow.gate_code_enc.slice(0, 20)}..."`);
-check('it decrypts back to what was typed', decryptField(propRow.gate_code_enc) === '4417');
+check('it decrypts back to what was typed', decryptField(propRow.gate_code_enc) === '4417#');
 
 check('setting a gate code is logged as a sensitive write',
   rows(await db.execute(sql`
@@ -418,14 +418,14 @@ check('the gate code does not leak onto the timeline',
   rows(await db.execute(sql`
     SELECT 1 FROM timeline_event
      WHERE customer_id = ${created.id}::uuid
-       AND (COALESCE(body,'') LIKE '%4417%' OR COALESCE(title,'') LIKE '%4417%')
+       AND (COALESCE(body,'') LIKE '%4417#%' OR COALESCE(title,'') LIKE '%4417#%')
   `)).length === 0);
 
 const propEdit = await updateProperty(db, manager, mainHouse.id, {
   label: 'Main house', propertyType: 'pool', isPrimary: true,
   accessNotes: 'Gate on the left side of the garage.',
   petNotes: 'Golden retriever, Moose',
-  gateCode: '8890',
+  gateCode: '8890#',
   address: { line1: '42 Lakeview Rd', city: 'Colchester', state: 'VT', postalCode: '05446' },
 });
 check('changing a gate code says that it changed, not what it changed to',
@@ -440,7 +440,7 @@ await updateProperty(db, manager, mainHouse.id, {
 check('an edit that does not mention the gate code leaves it alone',
   decryptField(rows<{ gate_code_enc: string }>(await db.execute(sql`
     SELECT gate_code_enc FROM property WHERE id = ${mainHouse.id}::uuid
-  `))[0]!.gate_code_enc) === '8890');
+  `))[0]!.gate_code_enc) === '8890#');
 
 const camp = await addProperty(db, manager, created.id, {
   label: 'Camp', propertyType: 'spa', isPrimary: true,
@@ -1496,6 +1496,22 @@ check('bound query parameters never reach a failed batch, however short the SQL'
 check('and the SQL itself still survives, so the failure is still diagnosable',
   batchError(drizzleShaped).includes('SELECT 1/0 FROM contact'));
 
+// The check above builds the message by hand, which means it would keep
+// passing through a drizzle upgrade that changed the message format - the
+// exact way a parse-based guard rots without anyone noticing. So force a REAL
+// failure and read what the real error produces.
+const realFailure = await (async () => {
+  try {
+    await db.execute(sql`SELECT 1 FROM app_user WHERE email = ${'bob.beauchamp@example.com'} AND 1/0 = 1`);
+    return null;
+  } catch (err) { return err; }
+})();
+check('a real driver error is caught, so this is not testing a hand-built fixture',
+  realFailure !== null);
+check('and its bound parameters do not reach the failed batch either',
+  !batchError(realFailure).includes('bob.beauchamp@example.com'),
+  JSON.stringify(batchError(realFailure).slice(0, 90)));
+
 
 
 console.log('\n── Every write carries a name ─────────────────────────────\n');
@@ -1603,7 +1619,7 @@ check('getTechnicians never returns a PIN hash',
 //     would actually produce.
 //  2. It matched a four-digit needle against whole serialized rows, uuid
 //     columns included. A random v4 uuid contains any given four hex
-//     characters about once in 2,100, and 17 uuid cells are scanned, so it
+//     characters about once in 3,855, and 17 uuid cells are scanned, so it
 //     failed spuriously about one run in 200. It did, on customer_id
 //     'ebe98bae-b8dc-4bdc-9e01-d604417c6273'.
 //
@@ -1614,32 +1630,66 @@ check('getTechnicians never returns a PIN hash',
 const jobRows = rows<Record<string, unknown>>(await db.execute(sql`
   SELECT w.*, p.label AS property_label
     FROM work_order w LEFT JOIN property p ON p.id = w.property_id`));
-const serialized = JSON.stringify(jobRows);
 
-// Every gate code any of these jobs could possibly expose, read back now
-// rather than assumed from a literal written a thousand lines earlier.
+// EVERY gate code in the database, not just the ones on properties these jobs
+// point at. A leak that puts the WRONG property's code on a job is exactly
+// what a careless list-view SELECT produces, and scoping the needle list to
+// the joined subset would make that particular bug invisible. At this data
+// size scanning all of them costs nothing.
 const liveCodes = rows<{ enc: string }>(await db.execute(sql`
-  SELECT DISTINCT p.gate_code_enc AS enc
-    FROM work_order w JOIN property p ON p.id = w.property_id
-   WHERE p.gate_code_enc IS NOT NULL`));
+  SELECT DISTINCT gate_code_enc AS enc FROM property WHERE gate_code_enc IS NOT NULL`));
 
 check('the gate-code check has at least one live code to look for',
   liveCodes.length > 0, `${liveCodes.length} propert(y/ies) with a code`);
 
-const leaked: string[] = [];
+// The fixture codes end in '#', and that is load-bearing rather than
+// decorative. A four-DIGIT needle is also four HEX characters, so it collides
+// with the uuid columns in these rows about once in 2,000 - this check failed
+// spuriously roughly one run in 200 until the fixture changed. Swapping the
+// hardcoded needle for the live code did not fix that, because the live code
+// was four digits too; only a character outside [0-9a-f] does. Keypads take
+// '#', so the fixture is realistic and the collision probability is zero
+// rather than merely small.
+const needles: Array<[string, string]> = [];
 for (const { enc } of liveCodes) {
-  if (serialized.includes(enc)) leaked.push('ciphertext');
+  needles.push(['ciphertext', enc]);
   const plain = decryptField(enc);
-  if (plain && serialized.includes(plain)) leaked.push('plaintext');
+  if (plain) needles.push(['plaintext', plain]);
 }
-check('no work order row carries a gate code in any field',
+
+// Both the recoverable tables and the UNRECOVERABLE one. timeline_event is
+// append-only by trigger, and ADR 0003 says so in as many words: instructions
+// and cancellation reasons get copied verbatim onto the feed, and if a code
+// ever lands in a timeline row, removing it takes a migration. Watching the
+// work order while ignoring the timeline guards the table you could fix and
+// not the one you could not.
+const scannedTables: Array<[string, string]> = [
+  ['work_order', JSON.stringify(jobRows)],
+  ['timeline_event', JSON.stringify(rows(await db.execute(sql`
+    SELECT title, body, payload FROM timeline_event`)))],
+  ['work_order_task', JSON.stringify(rows(await db.execute(sql`
+    SELECT label, notes FROM work_order_task`)))],
+];
+
+const leaked: string[] = [];
+for (const [table, text] of scannedTables) {
+  for (const [form, needle] of needles) {
+    if (text.includes(needle)) leaked.push(`${form} in ${table}`);
+  }
+}
+check('no gate code appears in a work order, a timeline entry, or a task',
   leaked.length === 0,
-  leaked.length ? `LEAKED: ${leaked.join(', ')}` : `${jobRows.length} job row(s) scanned`);
+  leaked.length ? `LEAKED: ${leaked.join(', ')}` : `${scannedTables.length} tables, ${needles.length} needles`);
 
 // A real vacuity guard. The previous one asserted "some key exists", which
 // cannot fail - the timestamps and numeric columns always survive, and none of
 // them can carry a gate code. These are the columns a code would actually land
 // in, and the check above is worthless if any of them stops being selected.
+//
+// What this deliberately does NOT catch: a code split across two columns (the
+// serializer puts `","` between fields, so no contiguous match exists) or one
+// typed with separators. Both are out of reach of a substring scan and neither
+// is worth pretending about.
 const FREE_TEXT = ['summary', 'instructions', 'work_performed', 'incomplete_reason', 'property_label'];
 const missingText = FREE_TEXT.filter((c) => !(c in (jobRows[0] ?? {})));
 check('and the free-text columns a code would land in are actually being scanned',

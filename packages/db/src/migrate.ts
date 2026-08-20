@@ -118,22 +118,62 @@ async function warnOnAmendedMigrations(h: { db: any }): Promise<void> {
   // check ran. .gitattributes now pins *.sql to LF, which fixes it at the
   // source, but a clone made before that or with different git settings would
   // still trip it, and a guard that cries wolf gets ignored.
+  //
+  // THREE forms, and the third is the one that matters. The first version
+  // compared `raw` against `CRLF -> LF`, which on a file that is already LF is
+  // the same string twice — one comparison wearing two hats, and missing the
+  // direction this repo is actually about to travel. Ten of the thirteen
+  // migrations are CRLF in the working tree right now, so a database migrated
+  // today recorded CRLF hashes for them; adding *.sql eol=lf converts those ten
+  // to LF on the next checkout, and then neither of the first two forms
+  // matches. That is ten warnings at once, on zero content change, which is
+  // precisely the wolf-crying this hashing-both-ways was meant to avoid.
+  // Reproduced against the real migrator before the third line was added.
   const sha = (t: string) => createHash('sha256').update(t).digest('hex');
   const amended = journal.entries.filter((e) => {
     const wasApplied = byMillis.get(String(e.when));
     if (!wasApplied) return false;
     const raw = readFileSync(resolve(migrationsFolder, `${e.tag}.sql`), 'utf8');
     const lf = raw.split('\r\n').join('\n');
-    return sha(raw) !== wasApplied && sha(lf) !== wasApplied;
+    const crlf = lf.split('\n').join('\r\n');
+    return sha(raw) !== wasApplied && sha(lf) !== wasApplied && sha(crlf) !== wasApplied;
   });
 
-  if (amended.length) {
-    console.warn(
-      `[migrate] WARNING: ${amended.length} already-applied migration(s) have ` +
-      `been edited since this database ran them: ${amended.map((a) => a.tag).join(', ')}.\n` +
-      '[migrate] Those edits did NOT run and will not run. This database is a ' +
-      'different shape from the migration folder.\n' +
-      '[migrate] Rebuild it, or land the change as a NEW migration.',
+  if (!amended.length) return;
+
+  const detail =
+    `${amended.length} already-applied migration(s) have been edited since this ` +
+    `database ran them: ${amended.map((a) => a.tag).join(', ')}.\n` +
+    '[migrate] Those edits did NOT run and will not run, so this database is a ' +
+    'different shape from the migration folder it was built from.';
+
+  // Refuses in a deploy context, warns on a laptop, and the asymmetry is the
+  // same one made further up for the PGlite check: locally, a pre-release
+  // amendment is legitimate and must not block a rebuild, while in CI or on
+  // Vercel it means the target database does not match the folder deployed
+  // alongside it. That is the same class of problem as migrating a throwaway
+  // PGlite instead of the real database, and it earns the same refusal — a
+  // warning in a build log is precisely the thing nobody reads.
+  //
+  // This is silent on a FRESH deploy database, which has applied nothing. It
+  // speaks on a re-deploy against an existing one, which is when it matters.
+  //
+  // NOT EXERCISED LOCALLY, and it cannot be: with no DATABASE_URL the PGlite
+  // refusal further up fires first and exits before reaching here, so this
+  // branch only runs against a real Postgres in CI or on Vercel — which is
+  // exactly its intended scope, and also means the first time it executes will
+  // be in a deploy. The warning path below is the one that has been tested.
+  if (deployContext) {
+    console.error(
+      `[migrate] REFUSED: ${detail}\n` +
+      '[migrate] Land the change as a NEW migration.',
     );
+    process.exitCode = 1;
+    return;
   }
+
+  console.warn(
+    `[migrate] WARNING: ${detail}\n` +
+    '[migrate] Rebuild it, or land the change as a NEW migration.',
+  );
 }

@@ -39,7 +39,7 @@ const CUSTOMERS = [
 ];
 
 const SITES = [
-  { SiteID: 'S-001', CustomerID: '14032', SiteName: 'Main house', Address1: '42 Lakeview Rd', City: 'Colchester', State: 'VT', Zip: '05446', AccessNotes: 'Gate on the left side of the garage. Dog is friendly but loud.', GateCode: '4417', PetNotes: 'Golden retriever, Moose', SiteType: 'pool', Active: '1' },
+  { SiteID: 'S-001', CustomerID: '14032', SiteName: 'Main house', Address1: '42 Lakeview Rd', City: 'Colchester', State: 'VT', Zip: '05446', AccessNotes: 'Gate on the left side of the garage. Dog is friendly but loud.', GateCode: '4417#', PetNotes: 'Golden retriever, Moose', SiteType: 'pool', Active: '1' },
   { SiteID: 'S-002', CustomerID: '14032', SiteName: 'Camp', Address1: '1180 West Lakeshore Dr', City: 'Colchester', State: 'VT', Zip: '5446', AccessNotes: 'Steep driveway, do not bring the big truck in mud season.', SiteType: 'spa', Active: '1' },
   { SiteID: 'S-003', CustomerID: '20881', SiteName: 'Main pool', Address1: '4800 Basin Harbor Rd', City: 'Vergennes', State: 'VT', Zip: '05491', AccessNotes: 'Check in at the front desk before going to the pump house.', SiteType: 'pool', Active: '1' },
   { SiteID: 'S-004', CustomerID: '99999', SiteName: 'Orphaned site', Address1: '1 Nowhere Rd', City: 'Essex', State: 'VT', Zip: '05452', Active: '1' },
@@ -176,16 +176,16 @@ async function verify() {
     SELECT payload FROM legacy_row WHERE entity='property' AND legacy_id='S-001'`))[0];
   const stagedRaw = JSON.stringify(staged?.payload ?? {});
   check('gate code is NOT in the staging table either',
-    !stagedRaw.includes('4417') && /v1:/.test(stagedRaw),
+    !stagedRaw.includes('4417#') && /v1:/.test(stagedRaw),
     'legacy_row.payload holds ciphertext, not the code');
 
   check('gate code is NOT stored in plaintext',
     typeof gate?.gate_code_enc === 'string'
       && gate.gate_code_enc.startsWith('v1:')
-      && !gate.gate_code_enc.includes('4417'),
+      && !gate.gate_code_enc.includes('4417#'),
     `stored as "${String(gate?.gate_code_enc).slice(0, 24)}..."`);
   check('gate code decrypts back to the original with the key',
-    decryptField(gate?.gate_code_enc) === '4417');
+    decryptField(gate?.gate_code_enc) === '4417#');
 
   check('orphaned site rejected rather than silently attached',
     rows(await db.execute(dsql`SELECT id FROM property WHERE legacy_id='S-004'`)).length === 0);

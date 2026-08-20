@@ -13,7 +13,7 @@
 #
 # So migrations and the SQL/JSON around them are pinned to LF everywhere.
 *.sql text eol=lf
-migrations/**/*.json text eol=lf
+**/migrations/**/*.json text eol=lf
 
 # Everything else: normalize in the repo, let git decide in the working tree.
 * text=auto

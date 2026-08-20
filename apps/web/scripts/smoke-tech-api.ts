@@ -144,7 +144,7 @@ const fixtures = await withDb(async (db) => {
   // Pinned to the demo's coded property rather than whichever row comes back
   // first. Once the reveal is scoped to the caller's own jobs, "SELECT ... LIMIT
   // 1" decides whether the positive case is a positive case, and it decides it
-  // by row order. S-001 is the demo property with a code (4417), and seed-jobs
+  // by row order. S-001 is the demo property with a code (4417#), and seed-jobs
   // assigns its job to Mike - so Mike is the assigned technician here and Jess,
   // a technician with no jobs at all (the empty-day check below says so), is the
   // ready-made negative.
@@ -205,17 +205,35 @@ const day = await dayRes.json();
 check('a signed-in technician gets their day', dayRes.ok && day.jobs?.length > 0,
   `${day.jobs?.length ?? 0} jobs`);
 check('the day belongs to the signed-in technician', day.technician?.id === mike.id);
-// Matched with a word boundary, not a bare substring. The day payload carries
-// four uuids per job (id, customer_id, property_id, assigned_user_id), a random
-// v4 uuid contains any given four hex characters about once in 2,100, and this
-// check therefore failed spuriously roughly one run in 200 — on nothing but a
-// coincidental id. The same defect in the write-layer suite was found by a
-// review after it fired on 'ebe98bae-b8dc-4bdc-9e01-d604417c6273'.
+// The needle carries a '#', which is the point rather than a detail.
 //
-// A gate code appearing in a payload appears as a JSON value or inside a
-// sentence, never welded into the middle of a hex run, so requiring a
-// non-hex-word boundary loses nothing a real leak could hide behind.
-const CODE_IN_TEXT = /4417/;
+// This check used to match a bare four-digit code against the serialized
+// payload, which carries four uuids per job (id, customer_id, property_id,
+// assigned_user_id). Every decimal digit is also a hex digit, so a 4-digit
+// code collides with a random v4 uuid about once in 2,000 - the check failed
+// spuriously roughly one run in 200, on nothing but a coincidental id.
+//
+// Two bad fixes preceded this one, both caught by review, and both worth
+// recording because they are the failure modes of fixing a test:
+//
+//   1. I wrote a comment claiming a word-boundary match and shipped a regex
+//      that was not one. The flake was unchanged and now MIS-DOCUMENTED,
+//      which is worse than leaving it - the next reader believes it is
+//      handled. (Worse still, the literal reached the file with stray
+//      backspace bytes in it, so it matched nothing at all.)
+//   2. In the sibling suite I swapped the needle for the live gate code and
+//      called the flake fixed. It was not: the live code was also four
+//      digits, so the collision rate barely moved.
+//
+// The real fix is upstream in the fixture. Keypad codes take '#', so the demo
+// code is '4417#' and cannot occur inside a hex run at all - the collision
+// probability is not reduced, it is zero. The regex is belt-and-braces on top,
+// and the check below asserts it has teeth so it cannot rot back into a
+// substring test the way (1) did.
+const CODE_IN_TEXT = /(^|[^0-9a-f])4417#/;
+check('the gate-code needle cannot match inside a hex id, and still catches a leak',
+  !CODE_IN_TEXT.test('ebe98bae-b8dc-4bdc-9e01-d604417c6273')
+  && CODE_IN_TEXT.test('{"instructions":"gate code 4417#, side gate"}'));
 check('gate codes are never in the day payload',
   !JSON.stringify(day).includes('gate_code_enc') && !CODE_IN_TEXT.test(JSON.stringify(day)));
 
@@ -343,7 +361,7 @@ if (!prop) {
 
   const revealed = await post('/api/gate-code', { propertyId: prop.id }, asMike);
   check('a technician assigned to the job can reveal that property\'s gate code', revealed.ok);
-  check('the revealed code is correct', (await revealed.json()).code === '4417');
+  check('the revealed code is correct', (await revealed.json()).code === '4417#');
 
   // ADR 0003 point 1, the half deferred until there were jobs to scope to.
   const refused = await post('/api/gate-code', { propertyId: prop.id }, asJess);
@@ -366,7 +384,7 @@ if (!prop) {
   const fromCounter = await post('/api/gate-code', { propertyId: prop.id }, asOffice);
   check('the office can still reveal a code for any property', fromCounter.status === 200,
     `got ${fromCounter.status}`);
-  check('the office gets the right code', (await fromCounter.json()).code === '4417');
+  check('the office gets the right code', (await fromCounter.json()).code === '4417#');
 }
 
 // ── what only the database can answer ──────────────────────────────────────
@@ -420,7 +438,7 @@ await withDb(async (db) => {
 
   const noCode = rows(await db.execute(sql`
     SELECT count(*)::int AS n FROM sensitive_access_log
-    WHERE entity_id = ${prop.id}::uuid AND reason LIKE '%4417%'`))[0];
+    WHERE entity_id = ${prop.id}::uuid AND reason LIKE '%4417#%'`))[0];
   check('the access log never quotes the code it recorded', Number(noCode?.n) === 0);
 
   // Leave the database as close to seeded as this suite can. The office

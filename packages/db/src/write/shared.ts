@@ -251,6 +251,14 @@ export async function customerExists(db: Db, customerId: string): Promise<boolea
  * is deterministic, it kills the whole class rather than a percentage of it,
  * and it costs nothing on a path whose errors have no such marker.
  *
+ * SCOPE, because those measurements are easy to over-read. This solves the
+ * params problem for DRIZZLE-WRAPPED errors, which is the ETL path. It does
+ * nothing for the channel path, where an adapter doing
+ * `throw new Error(await res.text())` produces a message with no params
+ * section at all — that remains length-bounded only, and a short API error
+ * carrying an email still arrives whole. Two different mechanisms, and only
+ * one of them is a content property.
+ *
  * ── Do not "improve" this by joining the cause chain ─────────────────────────
  *
  * `.message` on a DrizzleQueryError is the SQL, so the ETL path records no
@@ -260,7 +268,7 @@ export async function customerExists(db: Db, customerId: string): Promise<boolea
  *
  *   date/time field value out of range: "13/45/2019"
  *   Key (legacy_source, legacy_id)=(evosus, 14032) already exists.
- *     cannot be converted to text.
+ *   a NUL byte cannot be converted to text.
  *
  * If diagnosis is wanted, take the STRUCTURAL fields off the cause instead -
  * `code` (SQLSTATE), `constraint`, `table`. They name the rule that broke and
@@ -268,9 +276,24 @@ export async function customerExists(db: Db, customerId: string): Promise<boolea
  */
 export function batchError(err: unknown): string {
   const name = String((err as any)?.name ?? 'Error').slice(0, 40);
-  // Split before clip. The marker is drizzle's own, and a message without one
-  // is unchanged.
-  const message = String((err as any)?.message ?? err ?? '').split('\nparams:')[0]!;
+  // Structural field first, prose second.
+  //
+  // DrizzleQueryError sets its own `.query`, so when it is there nothing has to
+  // be parsed - and the parse is the part that rots. Matching the literal
+  // "\nparams:" couples this to drizzle's current message format: a future
+  // version that emits "params: " without the leading newline turns the split
+  // into a silent no-op, bound customer data starts flowing again, and every
+  // test stays green because the fixture is hand-built in the old shape. There
+  // is no failure that anyone would notice.
+  //
+  // Reading `.query` cannot rot that way. The regex is the fallback for a
+  // wrapper that only has prose, and it is loosened to tolerate the newline
+  // being absent or being a CRLF.
+  const raw = String((err as any)?.message ?? err ?? '');
+  const query = (err as any)?.query;
+  const message = typeof query === 'string' && query
+    ? `Failed query: ${query}`
+    : raw.split(/\r?\n?params:\s/)[0]!;
   const clipped = message.length > 200 ? `${message.slice(0, 200)}… (truncated)` : message;
   return clipped ? `${name}: ${clipped}` : name;
 }
