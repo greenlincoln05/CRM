@@ -379,3 +379,70 @@ noted in code as defense-in-depth only, not closed.
 **Next.** Resolve ADR 0004 vs 0006; generate and seal the KMS key with
 rotation written first; the two deferred smoke assertions above; then Evosus
 discovery once credentials exist.
+
+## 2026-08-20 — Office UI overhaul: Apollo-shaped shell, nav-as-data, roster, two new gates
+
+**Built**, on branch `office-ui` (created from `service-story` at `86b8f2e`),
+11 commits (`bf74d28` through `4b1cfb4`), then merged to `main` as `b3c7eca`
+and pushed. `office-ui` and `service-story` are both pushed to their remotes.
+Followed a spec written first: `docs/superpowers/specs/2026-08-20-office-ui-
+overhaul-design.md`.
+
+- An Apollo-style shell for the office app: icon rail + section panel + top
+  bar with global search (`apps/web/app/ui/OfficeNav.tsx`,
+  `apps/web/app/office.css`). A brand-light theme scoped entirely under
+  `.office`; `apps/web/app/globals.css` and the technician PWA are untouched.
+- Navigation as data: `apps/web/lib/nav.ts` (318 lines) enumerates every area
+  named in `CORE.md`, not just what's built.
+- 23 honest placeholder pages (`apps/web/app/ui/PlaceholderPage.tsx` renders
+  them) for every nav destination without a real implementation yet.
+- A `/customers` directory page.
+- A read-only `/settings/staff` roster: `listStaff()` in
+  `apps/web/lib/queries.ts` returns display name, role, and active status
+  only — nothing sensitive.
+- `apps/web/app/login/page.tsx` restyled to match the light theme.
+- Two new verification gates: `apps/web/scripts/smoke-nav.ts` (28 nav
+  targets, 56 checks — every destination answers 200 and renders inside the
+  shell; green) and `apps/web/scripts/check-contrast.ts` (15 foreground/
+  background pairs checked against WCAG AA 4.5:1; all 15 pass).
+
+**Decided (in the spec, not yet built).** Light-first theme with the
+Champlain brand palette. Google Workspace declared the platform's home —
+Calendar sync, Gmail, and eventually Google sign-in — which supersedes ADR
+0007's Clerk assumption. The spec asks for its own ADR when auth work
+actually begins; nothing toward it was built this session. **Recommend an
+ADR** to record this decision formally; it has not been written.
+
+**Reviewed.** Per-task reviews caught two fixes along the way: an
+`OfficeNav` active-state bug that traced back to the plan itself, not just
+the implementation, and a back-link label. `repo-reviewer` ran clean on the
+whole branch, noting three items as worth tidying but not blocking: a dead
+grid line in `office.css`'s ≤900px block, an unreachable `/customers`
+fallback branch in `sectionForPath`, and a UX note about two search inputs
+appearing on the Home page. `sensitive-data-guard` ran clean.
+
+**Broke, then recovered.** The session was interrupted once by an API spend
+limit mid-way through Task 3; it resumed cleanly with no rework needed.
+
+**Verified.** `smoke-nav` 28/28 targets, 56/56 checks green; `check-contrast`
+15/15 pairs pass WCAG AA.
+
+**Still open, unchanged from the prior entry.** ADR 0004 vs 0006
+contradiction; KMS key generation and the sealed offline copy; key rotation
+unwritten; nothing provisioned (Vercel/Neon/R2/AWS); Evosus discovery needs
+credentials or a vendor export; the reschedule-override timeline-note smoke
+assertion; the completed/incomplete capacity-counting check; the React 19
+failed-submit form-reset issue; the `FIELD_ROLES` allow-list idea. A real
+logo file is also still pending — the rail currently shows a "C" mark
+placeholder.
+
+**New, deferred this session.** The three `repo-reviewer` tidying items above
+(dead CSS grid line, unreachable directory fallback, duplicate search-input
+UX). The review-gate hook is confirmed still not installed on this machine —
+review markers this session were written via the repo's own marking script,
+not enforced by a `PreToolUse` hook.
+
+**Next.** Write the ADR for the Google Workspace / auth-provider decision
+(supersedes ADR 0007's Clerk assumption) before any auth code is touched;
+resolve ADR 0004 vs 0006; the three worth-tidying review findings above; a
+real logo asset.
