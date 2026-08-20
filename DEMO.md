@@ -213,7 +213,10 @@ npm run dev -w @lcp/web
 ```
 
 Back office at http://localhost:3100, technician app at
-http://localhost:3100/tech (best on a phone or a narrow window). There is
+http://localhost:3100/tech (best on a phone or a narrow window).
+The back office presents as an Apollo-style shell — icon rail, per-section
+navigation, global search — covering every CORE.md area; unbuilt sections
+are honest placeholder pages, not mockups. There is
 no sign-up form on purpose (ADR 0005). The `etl -- demo` run is the fastest
 tour: synthetic legacy data built to mimic twenty-year-old records —
 7-digit phone numbers, ZIPs missing a leading zero, two people in one name
