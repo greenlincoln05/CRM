@@ -36,7 +36,7 @@ Thumbs.db
 .idea/
 
 # pglite dev database
-.pgdata/
+.pgdata*/
 
 # Review-gate marker: a fact about THIS working copy at this moment, not
 # something to carry to another machine. See tools/review-gate/.
