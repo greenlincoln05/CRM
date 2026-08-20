@@ -69,7 +69,7 @@ is the reconciliation, honest in both directions. Status vocabulary:
 |---|---|---|
 | Property profiles: equipment, access instructions, gate codes, pet info | working | The flagship security story — encrypted gate codes, logged reveals, per-job scoping (ADRs 0003, 0009) |
 | Field photo capture | working | Technician PWA captures offline and syncs; photos land on the timeline |
-| Photos in cloud storage, signed URLs | designed | R2 with presigned uploads is decided (ADR 0007); today photos are served locally, session-gated but not job-scoped |
+| Photos in cloud storage, signed URLs | designed | R2 with presigned uploads is decided (ADR 0007); today photos are served locally, session-gated and job-scoped for field roles |
 | Easy review of historical job photos | partial | Timeline shows them; no dedicated photo browsing |
 
 ### Service & dispatch
@@ -79,16 +79,17 @@ is the reconciliation, honest in both directions. Status vocabulary:
 | Mobile technician app | working | Offline-first PWA at `/tech`: local-first reads, outbox sync, checklists, photos, wipe |
 | Booking, scheduling, cancelling jobs | working, tested | Write layer + `/schedule` day board grouped by technician; office-role-only (ADR 0010) |
 | Technician GPS / status | partial | Position fixes at meaningful moments (`work_order_ping`) — breadcrumbs, deliberately not live tracking; a PWA cannot report location in the background (ADR 0004). Fleet tracking stays in the existing fleet system |
-| Capacity limits (block overbooked days) | not started | Phase 2 roadmap |
+| Capacity limits (block overbooked days) | working | Per-person daily minutes budget (default 480) enforced in the write layer; the office may book anyway, and the timeline records the arithmetic |
 | Parts gating before scheduling | not started | Phase 2 roadmap; needs inventory (Phase 3) first |
 | Route optimization | not started | — |
 
 ### Inventory & purchasing
 
-Everything in this section — barcode-first inventory, real-time stock, bulk
-edits, reorder suggestions, seasonal forecasting, internal product notes,
-large-item visibility, multi-vendor purchasing — is **not started**. It is
-Phase 3 of the roadmap, deliberately after service and dispatch.
+Phase 3 has **begun in code**: an item master with barcodes and fuzzy counter
+search, and a sales-channel seam (`packages/db/src/schema/inventory.ts`,
+migrations 0011-0012) — so far unrecorded in `SESSIONS.md`. Reorder
+suggestions, seasonal forecasting, purchasing, and the rest of this section
+are **not started**.
 
 ### Sales, POS & payments
 
@@ -112,7 +113,7 @@ views, never `SELECT *`, so a property summary can never swallow a gate code.
 |---|---|
 | Cloud-native | designed — Vercel/Neon/R2/KMS decided (ADR 0007), nothing provisioned |
 | Excellent POS | not started (Phase 4) |
-| Strong inventory management | not started (Phase 3) |
+| Strong inventory management | begun in code (Phase 3) |
 | Integrated CRM | working in the demo |
 | Service scheduling | working, first cut |
 | Mobile apps | working (PWA — see the open ADR contradiction below) |
@@ -261,14 +262,11 @@ superseded, and that is a human decision no agent gets to make.
 **Known security limits, carried deliberately** (ADRs 0009/0010 record the
 reasoning): free text is the standing hole column encryption does not
 cover — a gate code typed into a sentence lands in an append-only timeline
-nobody can redact, and the mitigation is a warning, not a mechanism; the
-photo GET is session-gated but not job-scoped and cached `immutable`; a
+nobody can redact, and the mitigation is a warning, not a mechanism; a
 cached code on a phone outlives an unassignment until the day refresh;
 refusals are not written to the audit log, so probing is invisible to it.
 
-**Next up** (ranked, from `STATE.md`): a phone write path for
-`incomplete_reason` so the dispatch UI has a source; per-job scoping on
-`/api/gate-code` matching `/api/tech/photo`; resolve 0004 vs 0006; generate
+**Next up** (ranked, from `STATE.md`): resolve 0004 vs 0006; generate
 and seal the KMS key, rotation written first.
 
 ## Where everything lives
