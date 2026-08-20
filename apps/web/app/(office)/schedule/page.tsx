@@ -7,6 +7,7 @@ import {
   parseDay, shiftDay, today,
 } from '@/lib/jobs';
 import { canDispatch, requireUser } from '@/lib/session';
+import { DEFAULT_JOB_MINUTES } from '@lcp/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +44,7 @@ export const dynamic = 'force-dynamic';
 type Group = {
   id: string | null;
   name: string;
+  capacity: number | null;
   jobs: ScheduledJobRow[];
 };
 
@@ -61,6 +63,7 @@ function groupByTechnician(jobs: readonly ScheduledJobRow[]): Group[] {
       group = {
         id: job.assigned_user_id,
         name: job.assignee ?? 'Nobody assigned yet',
+        capacity: job.assignee_capacity,
         jobs: [],
       };
       groups.push(group);
@@ -68,6 +71,13 @@ function groupByTechnician(jobs: readonly ScheduledJobRow[]): Group[] {
     group.jobs.push(job);
   }
   return groups;
+}
+
+/** The minutes a column of work actually occupies. Mirrors assertCapacity. */
+function loadMinutes(g: Group): number {
+  return g.jobs
+    .filter((j) => j.status !== 'cancelled')
+    .reduce((m, j) => m + (j.estimated_minutes ?? DEFAULT_JOB_MINUTES), 0);
 }
 
 function addressLine(j: ScheduledJobRow): string | null {
@@ -164,6 +174,10 @@ function JobRow({ job, technicians, mayDispatch }: {
                 }}
                 technicians={technicians}
               />
+              <label className="hint" style={{ display: 'block' }}>
+                <input type="checkbox" name="overrideCapacity" />{' '}
+                Book anyway if this person&apos;s day is already full
+              </label>
             </ActionForm>
           </details>
         )}
@@ -245,6 +259,11 @@ export default async function SchedulePage({ searchParams }: {
         <div className="card" key={g.id ?? 'unassigned'}>
           <h3>
             {g.name} · {g.jobs.length} {g.jobs.length === 1 ? 'job' : 'jobs'}
+            {g.id && g.capacity != null && (
+              <span className={`load${loadMinutes(g) > g.capacity ? ' over' : ''}`}>
+                {loadMinutes(g)} / {g.capacity} min
+              </span>
+            )}
           </h3>
           {/* Unassigned is its own bucket, last, because it is the work still
               needing a name against it rather than a technician called NULL. */}

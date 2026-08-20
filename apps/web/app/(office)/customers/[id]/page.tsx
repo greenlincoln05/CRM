@@ -465,6 +465,10 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
             <ActionForm action={createWorkOrderAction} submitLabel="Schedule job" resetOnSuccess>
               <input type="hidden" name="customerId" value={customer.id} />
               <JobFields propertyOptions={propertyOptions} technicians={technicians} />
+              <label className="hint" style={{ display: 'block' }}>
+                <input type="checkbox" name="overrideCapacity" />{' '}
+                Book anyway if this person&apos;s day is already full
+              </label>
             </ActionForm>
           </details>
         )}

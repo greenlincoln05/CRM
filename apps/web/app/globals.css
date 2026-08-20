@@ -382,3 +382,8 @@ button.primary:disabled, button.danger:disabled { opacity: .55; cursor: default;
 /* On the board the flag carries a link out to the one-customer screen, because
    the sentence behind it is not shown in a list of forty addresses. */
 .flag a { text-decoration: underline; }
+
+/* The group header's load line: normal by default, calling out only when a
+   day has been booked past its capacity. */
+.load { margin-left: 0.5rem; font-size: 0.8rem; font-weight: 400; color: var(--text-dim); }
+.load.over { color: var(--danger); font-weight: 600; }

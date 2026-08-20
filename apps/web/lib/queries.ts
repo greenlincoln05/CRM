@@ -295,6 +295,7 @@ export type ScheduledJobRow = WorkOrderRow & {
   postal_code: string | null;
   en_route_at: string | null;
   arrived_at: string | null;
+  assignee_capacity: number | null;
 };
 
 /**
@@ -317,8 +318,8 @@ export type ScheduledJobRow = WorkOrderRow & {
  * next job. The board shows only THAT a job was left unfinished and links to
  * the record; the technician's own words are read one customer at a time,
  * because free text is where a gate code goes when it goes somewhere it should
- * not. Note the write path for it is the sync endpoint, not a field on the
- * phone yet — today it arrives only from a hand-built payload or seeded data.
+ * not. The phone writes it through /api/tech/sync when a technician marks a
+ * job incomplete and says why.
  *
  * Unassigned jobs sort last as their own bucket - they are the work still
  * needing a name against it, not work belonging to a technician called NULL.
@@ -335,6 +336,7 @@ export async function getDaySchedule(date?: string | null): Promise<ScheduledJob
            w.en_route_at::text, w.arrived_at::text, w.completed_at::text,
            w.customer_id, w.property_id,
            w.assigned_user_id, u.display_name AS assignee,
+           u.daily_capacity_minutes AS assignee_capacity,
            c.display_name  AS customer_name,
            c.primary_phone AS customer_phone,
            p.label AS property_label,
