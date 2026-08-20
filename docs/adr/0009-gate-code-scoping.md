@@ -101,3 +101,6 @@ photo GET is session-gated but not job-scoped and is cached `immutable` for a
 year; and free text remains the standing hole that column-level protection does
 not cover — the mitigation is a warning beside every box that lands in a
 property-linked field, and that is a convention, not a mechanism.
+
+*(The photo-GET item closed 2026-08-20: scoped by this ADR's own window
+via `apps/web/lib/assignment.ts`, tech cache bounded to an hour.)*
