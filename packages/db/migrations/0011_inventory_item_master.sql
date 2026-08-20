@@ -445,7 +445,8 @@ $$;
 -- '_', giving a three-word probe): 0.333 against search_text, 0.111 against
 -- the closest of the item's fitment rows, 0.222 against the barcode — and
 -- 0.353 against the merged haystack, which the final filter therefore keeps
--- and the narrowing does not offer. Roughly 0.06% of fuzzed queries. It is a rare miss on the
+-- and the narrowing does not offer. Roughly 0.06% of fuzzed queries. It is a
+-- rare miss on the
 -- weakest ranking tier, accepted knowingly in exchange for the scan, and it is
 -- the reason this says "superset" rather than "identical".
 --
@@ -609,8 +610,9 @@ AS $$
     -- survive the narrowing. Without this line it did not. Measured: a scan of
     -- '0087654312098' against a stored '0087654321098' — one transposed
     -- digit — returned nothing, though word_similarity of the two is 0.571,
-    -- comfortably over the 0.35 threshold, while the same query scores 0
-    -- against that item's search_text. Fuzzing several thousand generated
+    -- comfortably over the 0.35 threshold, while the same query scores only
+    -- 0.143 against that item's search_text — well under it. Fuzzing several
+    -- thousand generated
     -- queries against an un-narrowed reference implementation found ~4%
     -- divergent and every single one was this. With the line, ~0.06%, and
     -- those are the merged-vs-region gap described above rather than this.

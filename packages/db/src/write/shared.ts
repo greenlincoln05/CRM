@@ -229,10 +229,48 @@ export async function customerExists(db: Db, customerId: string): Promise<boolea
  * endpoint is plausibly a person's name. Measured before it was bounded: an
  * error carrying a 5,000-character name stored all 5,000, walking straight
  * past a limit that only ever inspected the other property.
+ *
+ * ── The params section, and why the length bound is not what saves you ──────
+ *
+ * Drizzle wraps every failed query in a DrizzleQueryError whose message is
+ * `Failed query: <SQL>\nparams: <bound values>`. On the ETL path those bound
+ * values ARE the customer table — names, emails, addresses. Whether the clip
+ * removed them was therefore decided by how long the failing statement's text
+ * happened to be, which is not a security property. Measured, by forcing each
+ * statement in transform.ts to fail and reading the column back:
+ *
+ *   customer INSERT        params begin at 1197   safely past the clip
+ *   property INSERT                          718   safely past
+ *   import_issue INSERT                      169   INSIDE - 31 chars of it
+ *   SELECT id FROM customer                   90   INSIDE - ~110 chars
+ *
+ * On a real demo run the import_issue case stopped at a bound uuid with about
+ * 60 characters to spare before a customer's name. Nothing asserted that.
+ *
+ * So the params section is now removed structurally, before any clipping. It
+ * is deterministic, it kills the whole class rather than a percentage of it,
+ * and it costs nothing on a path whose errors have no such marker.
+ *
+ * ── Do not "improve" this by joining the cause chain ─────────────────────────
+ *
+ * `.message` on a DrizzleQueryError is the SQL, so the ETL path records no
+ * diagnosis - and the obvious fix is to append `err.cause.message`, which is
+ * what this file's own `refused()` test helper does. Do not. Postgres embeds
+ * the offending value verbatim, confirmed on all three of:
+ *
+ *   date/time field value out of range: "13/45/2019"
+ *   Key (legacy_source, legacy_id)=(evosus, 14032) already exists.
+ *     cannot be converted to text.
+ *
+ * If diagnosis is wanted, take the STRUCTURAL fields off the cause instead -
+ * `code` (SQLSTATE), `constraint`, `table`. They name the rule that broke and
+ * carry no row data.
  */
 export function batchError(err: unknown): string {
   const name = String((err as any)?.name ?? 'Error').slice(0, 40);
-  const message = String((err as any)?.message ?? err ?? '');
+  // Split before clip. The marker is drizzle's own, and a message without one
+  // is unchanged.
+  const message = String((err as any)?.message ?? err ?? '').split('\nparams:')[0]!;
   const clipped = message.length > 200 ? `${message.slice(0, 200)}… (truncated)` : message;
   return clipped ? `${name}: ${clipped}` : name;
 }

@@ -1140,6 +1140,60 @@ check('a technician may not pull orders either',
   (await refused(() => pullChannelOrders(db, tech, shopify, {})))
     ?.includes('permission to manage sales channels') === true);
 
+// ── A triage report is a place customer data must not reach ───────────────
+//
+// recordIssue() rebuilds its payload from an allow-list of keys. An allow-list
+// of KEYS constrains which properties are copied and says nothing about what
+// hangs off them, and `description: string | null` in the port is a
+// compile-time claim a real adapter deserialising vendor JSON is not bound by.
+//
+// This is the exact shape a Shopify line item takes when an app writes
+// note_attributes or a personalisation field into it, so it is the expected
+// case rather than a hostile one. Every one of these values reached
+// import_issue.payload through an allow-listed key before the values were
+// coerced as well as the keys.
+class HostileChannel extends InMemoryChannel {
+  async pullOrders() {
+    return [{
+      externalOrderId: 'SHOP-9001',
+      placedAt: new Date('2026-08-15T12:00:00Z'),
+      customerName: 'Bob Beauchamp',
+      customerEmail: 'bob.beauchamp@example.com',
+      lines: [{
+        externalId: 'NOPE-1',
+        quantity: 1,
+        description: {
+          title: 'Pool noodle',
+          customer: { name: 'Bob Beauchamp', email: 'bob.beauchamp@example.com' },
+          note_attributes: [{ name: 'Gate code', value: '8890' }],
+          shipping_address: { line1: '42 Lakeview Rd', city: 'Colchester', zip: '05446' },
+        },
+      }],
+    }] as any;
+  }
+}
+const hostile = new HostileChannel('other');
+const hostilePull = await pullChannelOrders(db, manager, hostile, {});
+const hostileIssue = rows<{ payload: any; message: string }>(await db.execute(sql`
+  SELECT payload, message FROM import_issue WHERE batch_id = ${hostilePull.batchId}::uuid
+`));
+const hostileText = JSON.stringify(hostileIssue);
+
+for (const [what, needle] of [
+  ['a customer name', 'Beauchamp'],
+  ['an email address', 'bob.beauchamp@example.com'],
+  ['a street address', 'Lakeview'],
+  ['a gate code', '8890'],
+] as const) {
+  check(`${what} nested under an allow-listed key never reaches a triage report`,
+    !hostileText.includes(needle));
+}
+
+check('and the issue is still useful - it names the listing that was unmapped',
+  hostileIssue.length === 1 && hostileIssue[0]!.message.includes('NOPE-1'),
+  hostileIssue[0]?.message);
+
+
 // ── ADR 0001: this is not a money phase ────────────────────────────────────
 //
 // A price column on a storefront-facing table is the shortest path there is to
@@ -1147,7 +1201,7 @@ check('a technician may not pull orders either',
 // one-line "we need it for the Shopify push". Money cuts over January–March;
 // it is August. Assert the absence rather than trusting the comment.
 const MONEY_WORDS = /(price|cost|amount|total|charge|tax|discount)/i;
-for (const table of ['item', 'channel_listing']) {
+for (const table of ['item', 'item_barcode', 'item_fitment', 'channel_listing']) {
   const money = rows<{ column_name: string }>(await db.execute(sql`
     SELECT column_name FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = ${table}
@@ -1375,7 +1429,8 @@ check('a second word narrows the result rather than widening it',
 // did not work: the candidate scan matched barcodes by LIKE only, so a code
 // that no longer matches literally was dropped before the fuzzy filter that
 // would have kept it ever ran. word_similarity of the two codes is 0.571; the
-// query scores 0 against the item's text, so the barcode branch is the only
+// query scores only 0.143 against the item's text, well under the 0.35
+// threshold, so the barcode branch is the only
 // way this row can be reached.
 await db.execute(sql`
   INSERT INTO item_barcode (item_id, code, symbology)
@@ -1425,6 +1480,22 @@ check('an ordinary outage is still readable in full',
 check('and a thrown non-Error does not become "undefined"',
   batchError('connection reset') === 'Error: connection reset' && batchError(null).length > 0,
   JSON.stringify(batchError(null)));
+
+// The bound was never what protected the ETL path. Drizzle's message is
+// `Failed query: <SQL>\nparams: <bound values>`, and on that path the bound
+// values are customer names, emails and addresses — so whether the 200-char
+// clip removed them depended on how long the failing statement happened to be.
+// For the import_issue INSERT the params begin at character 169, inside the
+// window. The params section is now cut structurally, before any clipping.
+const drizzleShaped = new Error(
+  'Failed query: SELECT 1/0 FROM contact WHERE email = $1\nparams: bob.beauchamp@example.com');
+check('bound query parameters never reach a failed batch, however short the SQL',
+  !batchError(drizzleShaped).includes('bob.beauchamp@example.com'),
+  JSON.stringify(batchError(drizzleShaped)));
+
+check('and the SQL itself still survives, so the failure is still diagnosable',
+  batchError(drizzleShaped).includes('SELECT 1/0 FROM contact'));
+
 
 
 console.log('\n── Every write carries a name ─────────────────────────────\n');
@@ -1518,35 +1589,63 @@ check('getTechnicians never returns a PIN hash',
   !queryBody('getTechnicians').includes('pin_hash'));
 
 // And at runtime rather than by reading source: nothing this suite wrote to a
-// work order carries the demo gate code in any column.
+// work order carries a gate code in any column.
+//
+// This check was rewritten after sensitive-data-guard demonstrated it passing
+// while a real gate code sat in work_order.instructions. Two separate defects,
+// both worth recording because both are easy to reintroduce:
+//
+//  1. It searched for a HARDCODED '4417'. The fixture above changes that
+//     property's code to '8890' partway through the suite, so the guard was
+//     looking for a value that no longer existed anywhere in the database.
+//     Pasting the live code into instructions passed. So did pasting the
+//     ciphertext, which is what a stray `p.gate_code_enc` in a list SELECT
+//     would actually produce.
+//  2. It matched a four-digit needle against whole serialized rows, uuid
+//     columns included. A random v4 uuid contains any given four hex
+//     characters about once in 2,100, and 17 uuid cells are scanned, so it
+//     failed spuriously about one run in 200. It did, on customer_id
+//     'ebe98bae-b8dc-4bdc-9e01-d604417c6273'.
+//
+// The uuid exclusion that fixed (2) was sound but became unnecessary once (1)
+// is fixed properly, and framing it as a strength-versus-flakiness trade was
+// wrong: reading the LIVE value is both stronger and has no flake surface, so
+// there was no trade to make. Both plaintext and ciphertext are checked.
 const jobRows = rows<Record<string, unknown>>(await db.execute(sql`
   SELECT w.*, p.label AS property_label
     FROM work_order w LEFT JOIN property p ON p.id = w.property_id`));
-// UUIDs are excluded before matching, and that is a fix rather than a
-// loophole. The demo gate code is '4417', four hex characters, and a random
-// v4 UUID contains that sequence about once every 2,300 — across the uuid
-// columns on a handful of job rows this check failed spuriously roughly one
-// run in a hundred. It did, on the run that added this comment:
-// customer_id 'ebe98bae-b8dc-4bdc-9e01-d604417c6273'.
-//
-// A gate-code guard that cries wolf is worse than one that does not exist,
-// because the response to a check that is known to be flaky is to stop reading
-// it — and this is the check protecting non-negotiable #4. A machine id cannot
-// carry a gate code in any sense a person could read; every field that could
-// is still scanned.
-const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const readable = jobRows.map((r) => Object.fromEntries(
-  Object.entries(r).filter(([, v]) => !(typeof v === 'string' && uuidLike.test(v)))));
+const serialized = JSON.stringify(jobRows);
 
-// Vacuity guard: if a schema change ever made every scanned column a uuid,
-// the check above would pass while reading nothing at all.
-check('there are readable work order fields for the gate-code check to scan',
-  readable.length > 0 && readable.some((r) => Object.keys(r).length > 0),
-  `${readable.length} row(s), ${Object.keys(readable[0] ?? {}).length} readable field(s)`);
+// Every gate code any of these jobs could possibly expose, read back now
+// rather than assumed from a literal written a thousand lines earlier.
+const liveCodes = rows<{ enc: string }>(await db.execute(sql`
+  SELECT DISTINCT p.gate_code_enc AS enc
+    FROM work_order w JOIN property p ON p.id = w.property_id
+   WHERE p.gate_code_enc IS NOT NULL`));
 
+check('the gate-code check has at least one live code to look for',
+  liveCodes.length > 0, `${liveCodes.length} propert(y/ies) with a code`);
+
+const leaked: string[] = [];
+for (const { enc } of liveCodes) {
+  if (serialized.includes(enc)) leaked.push('ciphertext');
+  const plain = decryptField(enc);
+  if (plain && serialized.includes(plain)) leaked.push('plaintext');
+}
 check('no work order row carries a gate code in any field',
-  !JSON.stringify(readable).includes('4417'),
-  `${jobRows.length} job row(s) scanned`);
+  leaked.length === 0,
+  leaked.length ? `LEAKED: ${leaked.join(', ')}` : `${jobRows.length} job row(s) scanned`);
+
+// A real vacuity guard. The previous one asserted "some key exists", which
+// cannot fail - the timestamps and numeric columns always survive, and none of
+// them can carry a gate code. These are the columns a code would actually land
+// in, and the check above is worthless if any of them stops being selected.
+const FREE_TEXT = ['summary', 'instructions', 'work_performed', 'incomplete_reason', 'property_label'];
+const missingText = FREE_TEXT.filter((c) => !(c in (jobRows[0] ?? {})));
+check('and the free-text columns a code would land in are actually being scanned',
+  jobRows.length > 0 && missingText.length === 0,
+  missingText.length ? `not selected: ${missingText.join(', ')}` : FREE_TEXT.join(', '));
+
 
 console.log(`\n${failures === 0 ? 'ALL WRITE CHECKS PASSED' : `${failures} WRITE CHECK(S) FAILED`}`);
 await close();

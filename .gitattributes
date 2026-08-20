@@ -1,0 +1,19 @@
+# Line endings are content here, not a preference.
+#
+# core.autocrlf=true on this machine rewrites LF to CRLF on checkout, and
+# drizzle hashes migration files BYTE FOR BYTE into drizzle.__drizzle_migrations
+# (migrator.js: sha256 over the file text). So the same migration checked out on
+# Windows and on a Linux CI box hashes differently, and `git checkout` of a file
+# the local database already applied is enough to change its hash without
+# changing a single statement.
+#
+# That is not theoretical: it made the amended-migration guard in migrate.ts
+# report a false positive the first time it ran, on a file restored by git with
+# no content change at all.
+#
+# So migrations and the SQL/JSON around them are pinned to LF everywhere.
+*.sql text eol=lf
+migrations/**/*.json text eol=lf
+
+# Everything else: normalize in the repo, let git decide in the working tree.
+* text=auto

@@ -404,9 +404,18 @@ export async function pullChannelOrders(
         if (!match) {
           orderIsClean = false;
           problems++;
+          // The description is coerced and clipped HERE as well as in
+          // recordIssue, and the duplication is deliberate: unlike the
+          // payload, import_issue.message is rendered into the markdown
+          // triage report (etl/src/report.ts), so it is the more exposed of
+          // the two and must not inherit whatever the adapter put in this
+          // field. Same reasoning as the payload - see recordIssue below.
+          const label = typeof line.description === 'string'
+            ? line.description.slice(0, 120)
+            : null;
           await recordIssue(db, batchId, line.externalId,
             `Order ${order.externalOrderId} names ${port.channel} listing ` +
-            `"${line.externalId}"${line.description ? ` (${line.description})` : ''}, ` +
+            `"${line.externalId}"${label ? ` (${label})` : ''}, ` +
             'which is not mapped to any item.',
             {
               externalOrderId: order.externalOrderId,
@@ -497,9 +506,40 @@ async function recordIssue(
   // those to a customer, so the shape that must never reach here is the whole
   // order. What a person triaging an unmapped listing needs is the external id
   // and what the channel called it.
-  const safe = payload && typeof payload === 'object'
-    ? (({ externalId, description, quantity }: any) => ({ externalId, description, quantity }))(payload as any)
-    : payload;
+  //
+  // COERCED, not just picked. An allow-list of keys constrains which
+  // properties are copied and says nothing about what hangs off them, and the
+  // port's `description: string | null` is a compile-time claim that a real
+  // adapter deserialising vendor JSON is not bound by. sensitive-data-guard
+  // drove an order through here whose `description` was an object, and this is
+  // what reached import_issue.payload through an allow-listed key:
+  //
+  //   description: { title: "Pool noodle",
+  //                  customer: { name: "...", email: "..." },
+  //                  note_attributes: [{ name: "Gate code", value: "8890" }],
+  //                  shipping_address: { line1: "...", city: "...", zip: "..." } }
+  //
+  // Name, email, street address and a gate code, all past a filter that was
+  // working exactly as designed. That is the shape a Shopify line item takes
+  // when an app writes note_attributes or a personalisation field into it, so
+  // it is the expected case rather than a hostile one.
+  //
+  // String(), Number() and a length cap make the VALUES boring too. A nested
+  // object becomes "[object Object]", which is useless to a triager and
+  // harmless in a report - the right trade for a field whose entire job is to
+  // say which listing was unmapped.
+  const src = (payload ?? {}) as any;
+  const safe = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? {
+        externalId: String(src.externalId ?? '').slice(0, 200),
+        description: typeof src.description === 'string' ? src.description.slice(0, 200) : null,
+        quantity: Number(src.quantity) || 0,
+      }
+    // Not `payload`. A string, number or array reaching this parameter is a
+    // caller that stopped passing the shape above, and passing it through
+    // unexamined is how the allow-list gets bypassed entirely. `unknown` is
+    // the declared type; this is the boundary that has to honour it.
+    : null;
 
   await db.execute(sql`
     INSERT INTO import_issue (batch_id, entity, legacy_id, severity, code, message, payload)

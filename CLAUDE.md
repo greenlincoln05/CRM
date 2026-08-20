@@ -121,6 +121,16 @@ are versioned there and copied to `~/.claude/hooks/`, not loaded from the repo.
 
 - **PGlite is single-writer.** Stop `npm run dev -w @lcp/web` before running
   `npm run etl`, or the ETL cannot open the database.
+- **An applied migration is immutable.** Drizzle decides what to run by
+  comparing the journal's `when` against the newest applied row; it stores a
+  file hash and never reads it back. So editing a migration a database has
+  already run is a silent no-op there — `[migrate] ok`, and the database keeps
+  behaving like the version that actually ran. Land the change as a NEW
+  migration (`CREATE OR REPLACE FUNCTION` for search changes). `npm run
+  db:migrate` now warns when it sees this, but the warning is a backstop, not
+  permission. Same rule as ADRs: supersede, never edit in place. The warning is
+  hash-based, so it also fires on a comment-only edit; that is harmless to the
+  database and still means the file no longer matches what ran.
 - Hand-written migrations need `--> statement-breakpoint` between every
   statement. PGlite runs one statement per call.
 - Query results are unwrapped with `(r?.rows ?? r)` — the two drivers differ.

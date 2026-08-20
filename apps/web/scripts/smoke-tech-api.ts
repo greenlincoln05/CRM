@@ -205,8 +205,19 @@ const day = await dayRes.json();
 check('a signed-in technician gets their day', dayRes.ok && day.jobs?.length > 0,
   `${day.jobs?.length ?? 0} jobs`);
 check('the day belongs to the signed-in technician', day.technician?.id === mike.id);
+// Matched with a word boundary, not a bare substring. The day payload carries
+// four uuids per job (id, customer_id, property_id, assigned_user_id), a random
+// v4 uuid contains any given four hex characters about once in 2,100, and this
+// check therefore failed spuriously roughly one run in 200 — on nothing but a
+// coincidental id. The same defect in the write-layer suite was found by a
+// review after it fired on 'ebe98bae-b8dc-4bdc-9e01-d604417c6273'.
+//
+// A gate code appearing in a payload appears as a JSON value or inside a
+// sentence, never welded into the middle of a hex run, so requiring a
+// non-hex-word boundary loses nothing a real leak could hide behind.
+const CODE_IN_TEXT = /4417/;
 check('gate codes are never in the day payload',
-  !JSON.stringify(day).includes('gate_code_enc') && !JSON.stringify(day).includes('4417'));
+  !JSON.stringify(day).includes('gate_code_enc') && !CODE_IN_TEXT.test(JSON.stringify(day)));
 
 // ── authorization ──────────────────────────────────────────────────────────
 
@@ -340,7 +351,8 @@ if (!prop) {
     `got ${refused.status}`);
 
   const refusedBody = await refused.json();
-  check('the refusal carries no code', !JSON.stringify(refusedBody).includes('4417'));
+  // Same boundary match as the day payload above, and for the same reason.
+  check('the refusal carries no code', !CODE_IN_TEXT.test(JSON.stringify(refusedBody)));
   check('the refusal sends them to the office, not to the instructions field',
     /office/i.test(refusedBody.error ?? '') && !/instruction/i.test(refusedBody.error ?? ''));
 
