@@ -21,6 +21,9 @@ export default async function Home({ searchParams }: {
 
   return (
     <>
+      <div className="pagehead">
+        <h2>Find a customer</h2>
+      </div>
       <CustomerSearch initialQuery={q ?? ''} />
 
       {error ? (

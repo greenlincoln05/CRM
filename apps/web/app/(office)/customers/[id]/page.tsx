@@ -107,7 +107,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
 
   return (
     <>
-      <a className="back" href="/">← Search</a>
+      <a className="back" href="/customers">← Directory</a>
 
       <div className="header">
         <h2>{customer.display_name}</h2>

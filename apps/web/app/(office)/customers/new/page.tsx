@@ -17,7 +17,7 @@ export default async function NewCustomerPage() {
 
   return (
     <>
-      <a className="back" href="/">← Search</a>
+      <a className="back" href="/customers">← Search</a>
 
       <div className="header">
         <h2>New customer</h2>

@@ -215,8 +215,6 @@ export default async function SchedulePage({ searchParams }: {
 
   return (
     <>
-      <a className="back" href="/">← Search</a>
-
       <div className="header">
         <h2>{fmtDay(date)}</h2>
         <div className="meta">
