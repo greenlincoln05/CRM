@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 
 You sequence work for a business that cannot afford a bad Saturday in June. Read `docs/adr/0001-strangler-fig-migration.md` and the feature-status tables in `DEMO.md` before planning anything.
 
-All eight ADRs are accepted, but accepted is not implemented — check before planning on one. As of 2026-08-18: `0005` (staff auth by PIN and session) and `0008` (KMS key custody) are implemented; `0007` (Vercel/Neon/R2 hosting) is a decision with nothing provisioned; and `0004` (mobile platform) and `0006` (offline field app) reached **different conclusions about the same app** — 0006 chose Expo and rejected a PWA, and the PWA is what shipped. Treat that as an open contradiction to resolve, not a settled plan.
+All ten ADRs are accepted, but accepted is not implemented — check before planning on one. As of 2026-08-18: `0005` (staff auth by PIN and session) and `0008` (KMS key custody) are implemented; `0007` (Vercel/Neon/R2 hosting) is a decision with nothing provisioned; and `0004` (mobile platform) and `0006` (offline field app) reached **different conclusions about the same app** — 0006 chose Expo and rejected a PWA, and the PWA is what shipped. Treat that as an open contradiction to resolve, not a settled plan.
 
 ## The fixed constraints
 

@@ -68,9 +68,9 @@ is the reconciliation, honest in both directions. Status vocabulary:
 | CORE.md goal | Status | Where / what's missing |
 |---|---|---|
 | Property profiles: equipment, access instructions, gate codes, pet info | working | The flagship security story — encrypted gate codes, logged reveals, per-job scoping (ADRs 0003, 0009) |
-| Field photo capture | working | Technician PWA captures offline and syncs; photos land on the timeline |
+| Field photo capture | working | Technician PWA captures offline and syncs; stored with capture metadata, not yet surfaced on the timeline |
 | Photos in cloud storage, signed URLs | designed | R2 with presigned uploads is decided (ADR 0007); today photos are served locally, session-gated and job-scoped for field roles |
-| Easy review of historical job photos | partial | Timeline shows them; no dedicated photo browsing |
+| Easy review of historical job photos | not started | Photos are stored and job-scoped for retrieval, but no office or tech surface renders them yet |
 
 ### Service & dispatch
 
@@ -87,7 +87,7 @@ is the reconciliation, honest in both directions. Status vocabulary:
 
 Phase 3 has **begun in code**: an item master with barcodes and fuzzy counter
 search, and a sales-channel seam (`packages/db/src/schema/inventory.ts`,
-migrations 0011-0012) — so far unrecorded in `SESSIONS.md`. Reorder
+migrations 0011-0012) — work that reached the repo without a session log entry at the time. Reorder
 suggestions, seasonal forecasting, purchasing, and the rest of this section
 are **not started**.
 
