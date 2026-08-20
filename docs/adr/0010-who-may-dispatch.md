@@ -85,3 +85,5 @@ not job-scoped and is cached `immutable` for a year; a cached gate code on a
 device outlives an unassignment until the next day refresh; refusals are logged
 to stdout and not to the database; and free text remains the hole that
 column-level protection does not cover.
+
+*(The photo-GET item closed 2026-08-20 — see the note in ADR 0009.)*

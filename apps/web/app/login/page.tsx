@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import LoginForm from './LoginForm';
 import { getDb } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
+import '../office.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ export default async function LoginPage() {
   }
 
   return (
-    <div className="loginwrap">
+    <div className="office loginwrap" style={{ minHeight: '100vh' }}>
       {reachable && staffCount === 0 ? (
         <div className="card">
           <h3>No staff accounts yet</h3>

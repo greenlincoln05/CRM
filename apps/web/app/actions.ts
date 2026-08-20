@@ -337,6 +337,9 @@ export async function createWorkOrderAction(_prev: FormState, fd: FormData): Pro
     sequence: str(fd, 'sequence'),
     assignedUserId: str(fd, 'assignedUserId'),
     summary: str(fd, 'summary'),
+    // A checkbox: present means "on". The write layer treats anything but
+    // `true` as unticked, so a missing field is simply a normal booking.
+    overrideCapacity: fd.get('overrideCapacity') === 'on',
     instructions: str(fd, 'instructions'),
   }));
 }
@@ -349,6 +352,9 @@ export async function rescheduleWorkOrderAction(_prev: FormState, fd: FormData):
     scheduledWindow: str(fd, 'scheduledWindow'),
     assignedUserId: str(fd, 'assignedUserId'),
     sequence: str(fd, 'sequence'),
+    // A checkbox: present means "on". The write layer treats anything but
+    // `true` as unticked, so a missing field is simply a normal booking.
+    overrideCapacity: fd.get('overrideCapacity') === 'on',
   }));
 }
 

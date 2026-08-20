@@ -1248,6 +1248,109 @@ for (const table of ['item', 'item_barcode', 'item_fitment', 'channel_listing'])
     money.length === 0, money.length ? `found: ${money.join(', ')}` : '');
 }
 
+console.log('\n── Capacity ───────────────────────────────────────────────\n');
+
+// CORE.md: "Cannot block overbooked service days." Parts gating waits for
+// inventory; this is the overbooking half. A day is minutes, not job counts,
+// because a spring opening and a filter rinse are not the same size of hole
+// in a day. Jobs with no estimate count for DEFAULT_JOB_MINUTES.
+const CAP_DAY = '2026-06-01';
+
+for (let i = 1; i <= 4; i++) {
+  await createWorkOrder(db, manager, {
+    customerId: created.id, propertyId: mainHouse.id, type: 'service',
+    scheduledDate: CAP_DAY, estimatedMinutes: 120,
+    assignedUserId: tech.userId, summary: `Capacity filler ${i}`,
+  });
+}
+
+check('a day filled to exactly its capacity accepts the last job',
+  rows<{ n: number }>(await db.execute(sql`
+    SELECT count(*)::int AS n FROM work_order
+     WHERE assigned_user_id = ${tech.userId}::uuid
+       AND scheduled_date = ${CAP_DAY}::date
+  `))[0]!.n === 4);
+
+check('the job that does not fit is refused, and the refusal does the arithmetic',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, scheduledDate: CAP_DAY, estimatedMinutes: 30,
+    assignedUserId: tech.userId, summary: 'One more',
+  })))?.includes('480 of 480') === true);
+
+check('a job with no estimate still occupies its default hour',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, scheduledDate: CAP_DAY,
+    assignedUserId: tech.userId, summary: 'No estimate',
+  })))?.includes('would make 540') === true);
+
+// A full day belongs to one person, not to the date.
+const differentTruck = await createWorkOrder(db, manager, {
+  customerId: created.id, scheduledDate: CAP_DAY, estimatedMinutes: 450,
+  assignedUserId: staff.userId, summary: 'Different truck',
+});
+check('someone else’s day is not consulted',
+  /^W-\d+$/.test(differentTruck.number));
+
+check('an unassigned job is never capacity-checked',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, scheduledDate: CAP_DAY, estimatedMinutes: 480,
+    summary: 'Still needs a name',
+  }))) === null);
+
+const squeezed = await createWorkOrder(db, manager, {
+  customerId: created.id, propertyId: mainHouse.id, type: 'service',
+  scheduledDate: CAP_DAY, estimatedMinutes: 45,
+  assignedUserId: tech.userId, summary: 'Squeezed in',
+  overrideCapacity: true,
+});
+check('the office can knowingly book past a full day',
+  /^W-\d+$/.test(squeezed.number));
+
+check('and the timeline says so in plain arithmetic',
+  rows(await db.execute(sql`
+    SELECT 1 FROM timeline_event
+     WHERE ref_type = 'work_order' AND ref_id = ${squeezed.id}
+       AND body LIKE '%Booked over capacity%'
+  `)).length === 1);
+
+// Moving work onto a full day is the same booking decision from a different
+// form, so it is guarded the same way.
+const elsewhere = await createWorkOrder(db, manager, {
+  customerId: created.id, propertyId: mainHouse.id, type: 'service',
+  scheduledDate: '2026-06-02', estimatedMinutes: 60,
+  assignedUserId: tech.userId, summary: 'On the day after',
+});
+
+check('rescheduling onto a full day is refused the same way',
+  (await refused(() => rescheduleWorkOrder(db, manager, {
+    workOrderId: elsewhere.id, scheduledDate: CAP_DAY,
+    assignedUserId: tech.userId,
+  })))?.includes(`minutes on ${CAP_DAY}`) === true);
+
+check('and lands with the same explicit override',
+  (await refused(() => rescheduleWorkOrder(db, manager, {
+    workOrderId: elsewhere.id, scheduledDate: CAP_DAY,
+    assignedUserId: tech.userId, overrideCapacity: true,
+  }))) === null);
+
+check('a window change on an already-full day is not re-refused',
+  (await refused(() => rescheduleWorkOrder(db, manager, {
+    workOrderId: squeezed.id, scheduledDate: CAP_DAY,
+    assignedUserId: tech.userId, scheduledWindow: 'after 4pm',
+  }))) === null);
+
+// Calling work off hands the minutes back. The sum reads live rows, never
+// history: staff's 450 + another 450 would not fit, but after the
+// cancellation it does.
+await cancelWorkOrder(db, manager, {
+  workOrderId: differentTruck.id, reason: 'Customer away.',
+});
+check('a cancelled job hands its minutes back',
+  (await refused(() => createWorkOrder(db, manager, {
+    customerId: created.id, scheduledDate: CAP_DAY, estimatedMinutes: 450,
+    assignedUserId: staff.userId, summary: 'Fits again after the cancellation',
+  }))) === null);
+
 
 console.log('\n── Finding an item at the counter ─────────────────────────\n');
 

@@ -1,0 +1,1 @@
+ALTER TABLE "app_user" ADD COLUMN "daily_capacity_minutes" integer DEFAULT 480 NOT NULL;

@@ -130,7 +130,8 @@ Evosus means a scheduled task, an outbound TLS connection to Neon, and nothing
 inbound at all.
 
 This also keeps `./data/` — which holds real customer records — on a local disk
-inside the building, which is where the README already says it belongs.
+inside the building, which is where CLAUDE.md's non-negotiables already say it
+belongs.
 
 The practical requirements: the task runs under an account whose SQL Server
 credentials are read-only, it logs to a file the operator can read, and it

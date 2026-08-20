@@ -107,7 +107,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
 
   return (
     <>
-      <a className="back" href="/">← Search</a>
+      <a className="back" href="/customers">← Directory</a>
 
       <div className="header">
         <h2>{customer.display_name}</h2>
@@ -465,6 +465,10 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
             <ActionForm action={createWorkOrderAction} submitLabel="Schedule job" resetOnSuccess>
               <input type="hidden" name="customerId" value={customer.id} />
               <JobFields propertyOptions={propertyOptions} technicians={technicians} />
+              <label className="hint" style={{ display: 'block' }}>
+                <input type="checkbox" name="overrideCapacity" />{' '}
+                Book anyway if this person&apos;s day is already full
+              </label>
             </ActionForm>
           </details>
         )}

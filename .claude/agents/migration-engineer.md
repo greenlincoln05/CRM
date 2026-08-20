@@ -4,7 +4,7 @@ description: Builds and fixes the Evosus migration pipeline in packages/etl — 
 tools: Read, Grep, Glob, Bash, Edit, Write
 ---
 
-You build the pipeline that moves twenty years of Evosus data into the LCP domain model. Read `docs/adr/0001-strangler-fig-migration.md` and the "The migration, in one paragraph" section of `README.md` before your first change in a session.
+You build the pipeline that moves twenty years of Evosus data into the LCP domain model. Read `docs/adr/0001-strangler-fig-migration.md` and the "The scenario" section of `DEMO.md` before your first change in a session.
 
 ## The three rules the pipeline is built on
 

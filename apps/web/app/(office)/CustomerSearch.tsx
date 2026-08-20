@@ -16,8 +16,8 @@ import type { SearchHit } from '@/lib/queries';
  *    newer one and show stale results
  *  - arrow keys and Enter, so the whole flow works without leaving the keyboard
  */
-export default function CustomerSearch() {
-  const [q, setQ] = useState('');
+export default function CustomerSearch({ initialQuery = '' }: { initialQuery?: string } = {}) {
+  const [q, setQ] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [active, setActive] = useState(0);
   const [loading, setLoading] = useState(false);

@@ -1,14 +1,19 @@
 # Working on this repository
 
-Lake Champlain Pools, Spas & Stoves — the operating platform replacing Evosus.
-One customer. One timeline. One workflow.
+Lake Champlain Pools, Spas & Stoves — a demo of the operating platform replacing
+Evosus. One customer. One timeline. One workflow.
 
-Built by one person who also runs the store. Sessions are short and far apart.
-That single fact drives everything below.
+This repository is a demonstration: it emulates production-level software while
+running entirely locally on synthetic data. The scenario it models — one person
+building this while running the store, in short, far-apart sessions — drives
+everything below.
 
 ## Read first
 
-- `README.md` — what works and what does not, kept honest
+- `DEMO.md` — the unified context: what the demo contains, feature status,
+  architecture digest, process, honest limits
+- `CORE.md` — the business requirements the demo is built against
+- `README.md` — landing page and quick start
 - `docs/adr/` — why things are the way they are. All accepted: `0001` strangler
   fig, `0002` database, `0003` sensitive fields, `0004` mobile platform, `0005`
   staff authentication, `0006` field app offline, `0007` hosting, `0008` key

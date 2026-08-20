@@ -393,6 +393,62 @@ if (!prop) {
   check('the office gets the right code', (await fromCounter.json()).code === '4417#');
 }
 
+// ── photo scoping ──────────────────────────────────────────────────────────
+//
+// ADR 0003 point 5's leftover, named in ADRs 0009 and 0010 both: the GET was
+// session-gated but not job-scoped, and cached immutable for a year. Photos
+// of backyards, equipment and access points are exactly as sensitive as the
+// rest of the property profile, so the read is scoped by the same ADR 0009
+// window as the gate-code reveal. Jess — a technician with no jobs at all —
+// is the ready-made negative, same as the reveal checks above.
+//
+// A 1x1 PNG: sniffImage trusts bytes, not declared types, so the fixture has
+// to be a real image, however small.
+const PNG_1PX = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+const uploadForm = new FormData();
+uploadForm.set('clientActionId', randomUUID());
+uploadForm.set('workOrderId', mikeJob.id);
+uploadForm.set('file', new Blob([PNG_1PX], { type: 'image/png' }), 'fixture.png');
+
+const uploaded = await fetch(`${BASE}/api/tech/photo`, {
+  method: 'POST', headers: { cookie: asMike }, body: uploadForm,
+});
+const uploadedBody: any = await uploaded.json();
+check('a technician can upload a photo to their own job',
+  uploaded.status === 200 && !!uploadedBody.id, `status ${uploaded.status}`);
+
+const photoUrl = `/api/tech/photo?id=${uploadedBody.id}`;
+
+const mikeGet = await get(photoUrl, asMike);
+check('the assigned technician reads the photo back', mikeGet.status === 200);
+check('a technician’s copy is cached briefly, not for a year',
+  mikeGet.headers.get('cache-control') === 'private, max-age=3600',
+  String(mikeGet.headers.get('cache-control')));
+
+const jessGet = await get(photoUrl, asJess);
+check('a technician with no job on the property gets the same 404 as a missing id',
+  jessGet.status === 404);
+// Guarded on status: before the fix lands Jess gets image bytes, and .json()
+// on those would crash the suite instead of failing this check.
+const jessBody = jessGet.status === 404
+  ? JSON.stringify(await jessGet.json()) : `status ${jessGet.status}`;
+const missingBody = JSON.stringify(
+  await (await get(`/api/tech/photo?id=${randomUUID()}`, asJess)).json());
+check('…with the same body, so walking ids confirms nothing',
+  jessBody === missingBody);
+
+const officeGet = await get(photoUrl, asOffice);
+check('the office reads any photo, uncontested', officeGet.status === 200);
+check('and keeps the immutable cache — office access does not expire',
+  (officeGet.headers.get('cache-control') ?? '').includes('immutable'));
+
+check('a malformed photo id is a 400, not a 500 out of ::uuid',
+  (await get('/api/tech/photo?id=not-a-uuid', asMike)).status === 400);
+
 // ── what only the database can answer ──────────────────────────────────────
 
 // The second and last database phase: the timeline row, the ping, and the

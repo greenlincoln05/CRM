@@ -24,6 +24,16 @@ export const appUser = pgTable('app_user', {
   active: boolean('active').notNull().default(true),
 
   /**
+   * Minutes of scheduled work this person's day holds before the board calls
+   * it full — the write layer refuses past this unless the office explicitly
+   * books anyway. 480 is a straight eight hours; a seasonal half-day person
+   * gets their real number instead of a smaller role. Jobs with no estimate
+   * count for DEFAULT_JOB_MINUTES (see write/workOrders.ts). CORE.md names
+   * the pain point: "Cannot block overbooked service days."
+   */
+  dailyCapacityMinutes: integer('daily_capacity_minutes').notNull().default(480),
+
+  /**
    * SENSITIVE. scrypt hash of the counter PIN - never the PIN, never anything
    * reversible. Set through setPin(); verified through verifyPin(). A null here
    * means the account exists but cannot sign in yet.

@@ -74,6 +74,13 @@ public bucket. What is not done is the signed, short-lived URL: the GET is
 session-gated but not scoped to the viewer's job, and responses are cached
 `immutable` for a year.
 
+**Closed 2026-08-20** (job scoping and cache): the photo GET is now scoped
+for field roles by the same window as the gate-code reveal (shared
+predicate in `apps/web/lib/assignment.ts`), an out-of-scope read returns
+the same 404 as a missing id, and a technician's responses are cached for
+an hour rather than a year — the office keeps the immutable cache. The
+signed, short-lived URL itself still waits on R2 (ADR 0007).
+
 Authentication closed 2026-08-18 (ADR 0005, staff authentication): the
 reveal endpoint refuses without a session and records a real `app_user` id, so
 the log answers "who" with a name. A Clerk implementation was written the same

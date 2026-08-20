@@ -32,7 +32,7 @@ Read `CLAUDE.md` and `STATE.md` at the repo root first, every time.
 
 ## Rules
 
-- Record what happened, not what was intended. "Transform written, never run against real Evosus data" is the useful sentence; "customer migration complete" is not. The README's own status table is the tone to match.
+- Record what happened, not what was intended. "Transform written, never run against real Evosus data" is the useful sentence; "customer migration complete" is not. `DEMO.md`'s status tables are the tone to match.
 - Untested is a status. So is "works on synthetic demo data only."
 - Absolute dates (2026-08-18). Never "yesterday" or "last week."
 - Never write a gate code, a key, a credential, or a real customer name into any file. Reference secrets by variable name and where they live.

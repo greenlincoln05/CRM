@@ -4,8 +4,11 @@ import { requireUser } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Home() {
+export default async function Home({ searchParams }: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   await requireUser();
+  const { q } = await searchParams;
 
   let stats = { customers: 0, properties: 0, events: 0 };
   let error: string | null = null;
@@ -18,7 +21,10 @@ export default async function Home() {
 
   return (
     <>
-      <CustomerSearch />
+      <div className="pagehead">
+        <h2>Find a customer</h2>
+      </div>
+      <CustomerSearch initialQuery={q ?? ''} />
 
       {error ? (
         <p className="empty">
