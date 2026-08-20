@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { createDb, loadRepoEnv } from './index.js';
-import { type AmendmentAction, amendmentAction } from './migrate-guard.js';
+import { type AmendmentAction, amendmentAction } from './migration-amendment.js';
 
 loadRepoEnv();
 

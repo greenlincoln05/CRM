@@ -21,7 +21,7 @@ import {
   createUser, signIn, signOut, verifySession, setPin, revokeAllSessions, validatePin,
 } from './auth.js';
 import { decryptField } from './crypto.js';
-import { amendmentAction } from './migrate-guard.js';
+import { amendmentAction } from './migration-amendment.js';
 import {
   createCustomer, updateCustomer,
   addContact, updateContact, removeContact,
@@ -1502,9 +1502,9 @@ check('the same amendment in a deploy context refuses',
 // The message has to name the file. "Something was edited" sends someone
 // hunting through thirteen migrations.
 check('and either way it names which migration, and what to do about it',
-  ['warn', 'refuse'].every((_l, i) => {
-    const t = amendmentAction(['0011_inventory_item_master'], i === 1).text;
-    return t.includes('0011_inventory_item_master') && t.includes('NEW migration');
+  [false, true].every((isDeploy) => {
+    const text = amendmentAction(['0011_inventory_item_master'], isDeploy).text;
+    return text.includes('0011_inventory_item_master') && text.includes('NEW migration');
   }));
 
 // ── What a failed batch is allowed to record ───────────────────────────────
