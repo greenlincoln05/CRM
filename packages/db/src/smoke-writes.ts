@@ -21,6 +21,7 @@ import {
   createUser, signIn, signOut, verifySession, setPin, revokeAllSessions, validatePin,
 } from './auth.js';
 import { decryptField } from './crypto.js';
+import { amendmentAction } from './migrate-guard.js';
 import {
   createCustomer, updateCustomer,
   addContact, updateContact, removeContact,
@@ -1140,6 +1141,43 @@ check('a technician may not pull orders either',
   (await refused(() => pullChannelOrders(db, tech, shopify, {})))
     ?.includes('permission to manage sales channels') === true);
 
+// ── The push and the pull must agree about what an id is ──────────────────
+//
+// listItemOnChannel stores the external id through clean(), which trims but
+// has no length bound, and channel_listing.external_id is plain text. So any
+// bound applied on the pull side is a bound that exists on ONE side of a round
+// trip, and the failure is silent in the worst direction: the listing is
+// there, the lookup misses it, and every line is filed as
+// UNKNOWN_CHANNEL_LISTING pointing a triager at a mapping table that is
+// correct and complete.
+//
+// That is not hypothetical - a hardening change clipped the lookup key to 80
+// characters and this broke at exactly 81. A Shopify variant GID is ~43
+// characters, so nothing here would have caught it; an adapter that
+// namespaces by shop domain, or an EDI id, or an opaque cursor goes past it.
+class LongIdChannel extends InMemoryChannel {
+  constructor(private readonly fixedId: string) { super('other'); }
+  async pushItem(i: any) { await super.pushItem(i); return { externalId: this.fixedId }; }
+  async pullOrders() {
+    return [{
+      externalOrderId: 'ORD-LONG', placedAt: new Date('2026-08-15T12:00:00Z'),
+      lines: [{ externalId: this.fixedId, quantity: 1, description: 'thing' }],
+    }] as any;
+  }
+}
+const longId = `gid://shopify/ProductVariant/${'9'.repeat(90)}`;
+const longChannel = new LongIdChannel(longId);
+await listItemOnChannel(db, manager, longChannel, { itemId: seal!.id });
+const longStored = rows<{ external_id: string }>(await db.execute(sql`
+  SELECT external_id FROM channel_listing WHERE external_id = ${longId}`))[0];
+check('a long external id is stored whole, not truncated on the way in',
+  longStored?.external_id === longId, `${longId.length} chars`);
+
+const longPull = await pullChannelOrders(db, manager, longChannel, {});
+check('and the pull finds the listing it just created, however long the id',
+  longPull.resolved === 1 && longPull.problems === 0,
+  `resolved ${longPull.resolved}, problems ${longPull.problems}`);
+
 // ── A triage report is a place customer data must not reach ───────────────
 //
 // recordIssue() rebuilds its payload from an allow-list of keys. An allow-list
@@ -1441,6 +1479,34 @@ check('a barcode typed with two digits transposed still finds the item',
   'stored 0087654321098, typed 0087654312098');
 
 
+// ── The migration-amendment decision ──────────────────────────────────────
+//
+// Asserted here rather than left to a deploy, because the refuse branch cannot
+// be reached locally: with no DATABASE_URL the PGlite refusal at the top of
+// migrate.ts exits first, and there is no local Postgres. Left unsplit, the
+// first execution of that branch would be a production deploy. Splitting the
+// decision out from the I/O makes both halves testable with no database at
+// all - the same move that made batchError assertable.
+console.log('\n── Amended migrations ────────────────────────────────────\n');
+
+check('an unamended migration folder says nothing at all',
+  amendmentAction([], false).level === 'none'
+  && amendmentAction([], true).level === 'none');
+
+check('an amendment on a laptop warns, so a pre-release rebuild is not blocked',
+  amendmentAction(['0011_inventory_item_master'], false).level === 'warn');
+
+check('the same amendment in a deploy context refuses',
+  amendmentAction(['0011_inventory_item_master'], true).level === 'refuse');
+
+// The message has to name the file. "Something was edited" sends someone
+// hunting through thirteen migrations.
+check('and either way it names which migration, and what to do about it',
+  ['warn', 'refuse'].every((_l, i) => {
+    const t = amendmentAction(['0011_inventory_item_master'], i === 1).text;
+    return t.includes('0011_inventory_item_master') && t.includes('NEW migration');
+  }));
+
 // ── What a failed batch is allowed to record ───────────────────────────────
 //
 // `import_batch.error` is read in the same triage report as an import_issue
@@ -1695,6 +1761,16 @@ const missingText = FREE_TEXT.filter((c) => !(c in (jobRows[0] ?? {})));
 check('and the free-text columns a code would land in are actually being scanned',
   jobRows.length > 0 && missingText.length === 0,
   missingText.length ? `not selected: ${missingText.join(', ')}` : FREE_TEXT.join(', '));
+
+// The same guard for the other two tables, because it was applied to one of
+// three and the whole reason it exists is that "passes while reading nothing"
+// is a real failure mode. `JSON.stringify([])` is '[]', which contains no gate
+// code and never will. timeline_event is the one that matters most here - it
+// is the table ADR 0003 calls unrecoverable.
+const emptyTables = scannedTables.filter(([, text]) => text === '[]').map(([t]) => t);
+check('and all three scanned tables actually had rows to scan',
+  emptyTables.length === 0,
+  emptyTables.length ? `empty: ${emptyTables.join(', ')}` : scannedTables.map(([t]) => t).join(', '));
 
 
 console.log(`\n${failures === 0 ? 'ALL WRITE CHECKS PASSED' : `${failures} WRITE CHECK(S) FAILED`}`);

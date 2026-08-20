@@ -394,26 +394,41 @@ export async function pullChannelOrders(
       for (const line of order.lines) {
         lines++;
 
-        // Coerced BEFORE the lookup, not just before the issue row.
+        // TWO separate jobs, deliberately not done by one function.
         //
-        // `external_id` is a text column, so binding a non-string makes the
-        // driver refuse the statement — and that exception escapes this loop,
-        // fails the batch, and abandons the other thirty-nine orders. Bad data
-        // from a channel would then be an exception rather than an
-        // import_issue row, which is non-negotiable #3 turned exactly inside
-        // out, in the function whose header argues at length for the opposite.
-        // The port types this `string`, but types are erased and a real
-        // adapter deserialising vendor JSON is not bound by them.
+        // Coercion fixes a real bug and belongs before the lookup: external_id
+        // is a text column, so binding a non-string makes the driver refuse
+        // the statement, and that exception escapes this loop, fails the
+        // batch, and abandons every other order in it. Bad data from a channel
+        // would then be an exception rather than an import_issue row — non-
+        // negotiable #3 turned exactly inside out, in the function whose
+        // header argues at length for the opposite. The port types this
+        // `string`, but types are erased and a real adapter deserialising
+        // vendor JSON is not bound by them.
+        //
+        // TRUNCATION is for the report, and must NOT touch the lookup key.
+        // The first version of this clipped both, and that silently broke the
+        // round trip: listItemOnChannel stores the id through clean(), which
+        // has no length bound, so a push stored the whole thing and the pull
+        // searched for its first 80 characters. Measured — resolves at 80,
+        // fails at 81 and never recovers, and every line from such a channel
+        // is filed as UNKNOWN_CHANNEL_LISTING pointing a triager at a mapping
+        // table that is correct and complete. A Shopify variant GID is ~43
+        // characters, but an adapter that namespaces by shop domain, or an EDI
+        // id, or an opaque cursor goes past it.
+        const asId = (v: unknown) => (typeof v === 'string' ? v : null);
         const clip = (v: unknown, n: number) =>
           typeof v === 'string' ? v.slice(0, n) : null;
-        const lineRef = clip(line.externalId, 80) ?? '(no listing id)';
+
+        const lineId = asId(line.externalId);           // full — the lookup
+        const lineRef = (lineId ?? '').slice(0, 80) || '(no listing id)';  // clipped — the report
 
         const match = rows<{ listing_id: string; item_id: string; sku: string }>(
           await db.execute(sql`
             SELECT cl.id AS listing_id, i.id AS item_id, i.sku
               FROM channel_listing cl
               JOIN item i ON i.id = cl.item_id
-             WHERE cl.channel = ${port.channel} AND cl.external_id = ${lineRef}
+             WHERE cl.channel = ${port.channel} AND cl.external_id = ${lineId}
           `))[0];
 
         if (!match) {

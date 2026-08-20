@@ -227,13 +227,19 @@ check('the day belongs to the signed-in technician', day.technician?.id === mike
 //
 // The real fix is upstream in the fixture. Keypad codes take '#', so the demo
 // code is '4417#' and cannot occur inside a hex run at all - the collision
-// probability is not reduced, it is zero. The regex is belt-and-braces on top,
-// and the check below asserts it has teeth so it cannot rot back into a
-// substring test the way (1) did.
-const CODE_IN_TEXT = /(^|[^0-9a-f])4417#/;
+// probability is not reduced, it is zero.
+//
+// Which is also why there is no boundary prefix on the needle. A first attempt
+// wrote /(^|[^0-9a-f])4417#/, and that is belt over a belt that costs a real
+// case: it fails to match '{"x":"ab4417#"}', a leak welded onto a hex-looking
+// prefix. '#' cannot appear in a uuid, so the bare needle already rejects
+// every uuid AND catches that one. The check below pins both halves so this
+// cannot rot back into the substring test that (1) was.
+const CODE_IN_TEXT = /4417#/;
 check('the gate-code needle cannot match inside a hex id, and still catches a leak',
   !CODE_IN_TEXT.test('ebe98bae-b8dc-4bdc-9e01-d604417c6273')
-  && CODE_IN_TEXT.test('{"instructions":"gate code 4417#, side gate"}'));
+  && CODE_IN_TEXT.test('{"instructions":"gate code 4417#, side gate"}')
+  && CODE_IN_TEXT.test('{"x":"ab4417#"}'));
 check('gate codes are never in the day payload',
   !JSON.stringify(day).includes('gate_code_enc') && !CODE_IN_TEXT.test(JSON.stringify(day)));
 

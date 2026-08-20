@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { createDb, loadRepoEnv } from './index.js';
+import { type AmendmentAction, amendmentAction } from './migrate-guard.js';
 
 loadRepoEnv();
 
@@ -49,8 +50,20 @@ try {
     const { migrate } = await import('drizzle-orm/pglite/migrator');
     await migrate(handle.db, { migrationsFolder });
   }
-  await warnOnAmendedMigrations(handle);
-  console.log('[migrate] ok');
+  // "ok" only if it IS ok, and never a bare "ok" under a message saying the
+  // database does not match its own migration folder.
+  //
+  // This guard exists to make "the only tell is [migrate] ok" untrue, so a
+  // refusal printing ok underneath itself would defeat it entirely - exit code
+  // 1, and the last line of the build log saying the opposite. A warning is
+  // not a failure and the migrations really did apply, but a bare "ok" still
+  // reads as all-clear and undercuts the line above it, so it is qualified.
+  const level = await reportAmendedMigrations(handle);
+  console.log(
+    level === 'refuse' ? '[migrate] NOT ok'
+    : level === 'warn' ? '[migrate] ok, with warnings above'
+    : '[migrate] ok',
+  );
 } catch (err) {
   console.error('[migrate] FAILED');
   console.error(err);
@@ -89,7 +102,7 @@ try {
  * visible instead of silent. It warns rather than fails, because a legitimate
  * pre-release amendment (which 0011 was) should not block a rebuild.
  */
-async function warnOnAmendedMigrations(h: { db: any }): Promise<void> {
+async function reportAmendedMigrations(h: { db: any }): Promise<AmendmentAction['level']> {
   const { createHash } = await import('node:crypto');
   const { readFileSync } = await import('node:fs');
 
@@ -102,7 +115,7 @@ async function warnOnAmendedMigrations(h: { db: any }): Promise<void> {
   } catch {
     // No migrations table yet, or a driver that names it differently. Nothing
     // to compare against, and this must never be the reason a migrate fails.
-    return;
+    return 'none';
   }
 
   const byMillis = new Map(applied.map((a) => [String(a.created_at), a.hash]));
@@ -139,41 +152,16 @@ async function warnOnAmendedMigrations(h: { db: any }): Promise<void> {
     return sha(raw) !== wasApplied && sha(lf) !== wasApplied && sha(crlf) !== wasApplied;
   });
 
-  if (!amended.length) return;
+  return report(amendmentAction(amended.map((a) => a.tag), Boolean(deployContext)));
+}
 
-  const detail =
-    `${amended.length} already-applied migration(s) have been edited since this ` +
-    `database ran them: ${amended.map((a) => a.tag).join(', ')}.\n` +
-    '[migrate] Those edits did NOT run and will not run, so this database is a ' +
-    'different shape from the migration folder it was built from.';
-
-  // Refuses in a deploy context, warns on a laptop, and the asymmetry is the
-  // same one made further up for the PGlite check: locally, a pre-release
-  // amendment is legitimate and must not block a rebuild, while in CI or on
-  // Vercel it means the target database does not match the folder deployed
-  // alongside it. That is the same class of problem as migrating a throwaway
-  // PGlite instead of the real database, and it earns the same refusal — a
-  // warning in a build log is precisely the thing nobody reads.
-  //
-  // This is silent on a FRESH deploy database, which has applied nothing. It
-  // speaks on a re-deploy against an existing one, which is when it matters.
-  //
-  // NOT EXERCISED LOCALLY, and it cannot be: with no DATABASE_URL the PGlite
-  // refusal further up fires first and exits before reaching here, so this
-  // branch only runs against a real Postgres in CI or on Vercel — which is
-  // exactly its intended scope, and also means the first time it executes will
-  // be in a deploy. The warning path below is the one that has been tested.
-  if (deployContext) {
-    console.error(
-      `[migrate] REFUSED: ${detail}\n` +
-      '[migrate] Land the change as a NEW migration.',
-    );
+/** Print an action and hand its level back so the closing line can reflect it. */
+function report(action: AmendmentAction): AmendmentAction['level'] {
+  if (action.level === 'refuse') {
+    console.error(action.text);
     process.exitCode = 1;
-    return;
+  } else if (action.level === 'warn') {
+    console.warn(action.text);
   }
-
-  console.warn(
-    `[migrate] WARNING: ${detail}\n` +
-    '[migrate] Rebuild it, or land the change as a NEW migration.',
-  );
+  return action.level;
 }
