@@ -32,6 +32,16 @@ function Icon({ name }: { name: string }) {
   );
 }
 
+function isSubActive(pathname: string, href: string): boolean {
+  if (pathname === href) return true;
+  // Directory owns /customers/<id> record pages but not /customers/new,
+  // which is its own nav item.
+  if (href === '/customers') {
+    return pathname.startsWith('/customers/') && !pathname.startsWith('/customers/new');
+  }
+  return href !== '/' && pathname.startsWith(href + '/');
+}
+
 export default function OfficeNav({ sections }: { sections: Section[] }) {
   const pathname = usePathname();
   const active = sectionForPath(pathname);
@@ -82,12 +92,7 @@ export default function OfficeNav({ sections }: { sections: Section[] }) {
             <h2>{active.label}</h2>
             {active.subsections.map((sub) => (
               <a key={sub.href} href={sub.href}
-                data-active={
-                  (pathname === sub.href
-                    || (sub.href !== '/' && pathname.startsWith(sub.href + '/'))
-                    || (sub.href === '/customers' && pathname.startsWith('/customers/') && !pathname.startsWith('/customers/new')))
-                    ? 'true' : undefined
-                }>
+                data-active={isSubActive(pathname, sub.href) ? 'true' : undefined}>
                 {sub.label}
                 {sub.status !== 'built' && <span className="chip planned">planned</span>}
               </a>
