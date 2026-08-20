@@ -14,7 +14,7 @@
  * Wednesday. That loop is the whole migration strategy.
  */
 import { sql as dsql } from 'drizzle-orm';
-import { createDb, encryptField, initFieldKey } from '@lcp/db';
+import { batchError, createDb, encryptField, initFieldKey } from '@lcp/db';
 import { config } from './config.js';
 import {
   cleanText, normalizePhone, normalizeEmail, normalizeZip, normalizeState,
@@ -245,7 +245,7 @@ export async function transformCustomers(opts: { limit?: number } = {}) {
     console.log(`\n[transform] customers: ${written.toLocaleString()} written, ${ctx.issues} issues logged (batch ${batchId})`);
   } catch (err: any) {
     await db.execute(dsql`
-      UPDATE import_batch SET status='failed', finished_at=now(), error=${String(err?.message ?? err)}
+      UPDATE import_batch SET status='failed', finished_at=now(), error=${batchError(err)}
       WHERE id = ${batchId}`);
     throw err;
   } finally {
@@ -337,7 +337,7 @@ export async function transformProperties(opts: { limit?: number } = {}) {
       WHERE id = ${batchId}`);
     console.log(`[transform] properties: ${written} written, ${skipped} skipped, ${ctx.issues} issues (batch ${batchId})`);
   } catch (err: any) {
-    await db.execute(dsql`UPDATE import_batch SET status='failed', finished_at=now(), error=${String(err?.message ?? err)} WHERE id = ${batchId}`);
+    await db.execute(dsql`UPDATE import_batch SET status='failed', finished_at=now(), error=${batchError(err)} WHERE id = ${batchId}`);
     throw err;
   } finally {
     await close();
@@ -424,7 +424,7 @@ export async function transformHistory(opts: { limit?: number } = {}) {
       WHERE id = ${batchId}`);
     console.log(`\n[transform] history: ${written.toLocaleString()} events, ${skipped} skipped, ${ctx.issues} issues (batch ${batchId})`);
   } catch (err: any) {
-    await db.execute(dsql`UPDATE import_batch SET status='failed', finished_at=now(), error=${String(err?.message ?? err)} WHERE id = ${batchId}`);
+    await db.execute(dsql`UPDATE import_batch SET status='failed', finished_at=now(), error=${batchError(err)} WHERE id = ${batchId}`);
     throw err;
   } finally {
     await close();

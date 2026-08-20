@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import type { Actor } from '../auth.js';
 import type { ChannelItem, SellingChannelPort } from '../channels/port.js';
 import { WriteError, clean } from './input.js';
-import { type Db, MANUAL_SOURCE, assertUuid, isUniqueViolation, rows } from './shared.js';
+import { type Db, MANUAL_SOURCE, assertUuid, batchError, isUniqueViolation, rows } from './shared.js';
 
 /**
  * The selling-channel seam — Phase 3, unit 2.
@@ -479,26 +479,6 @@ export async function pullChannelOrders(
     `);
     throw err;
   }
-}
-
-/**
- * What is safe to store on a failed batch.
- *
- * 200 characters is enough for "fetch failed", "401 Unauthorized" or
- * "getaddrinfo ENOTFOUND" — which is the entire diagnostic value of this
- * field — and short enough that a response body pasted onto an error message
- * cannot arrive whole. The truncation is marked so nobody reads a clipped
- * message as the complete one.
- *
- * Deliberately NOT a redaction pass over the text. Guessing which substrings
- * are personal is the approach that works until the day it doesn't; a length
- * bound is a rule that holds regardless of what the channel decided to say.
- */
-function batchError(err: unknown): string {
-  const name = (err as any)?.name ?? 'Error';
-  const message = String((err as any)?.message ?? err ?? '');
-  const clipped = message.length > 200 ? `${message.slice(0, 200)}… (truncated)` : message;
-  return clipped ? `${name}: ${clipped}` : name;
 }
 
 /**

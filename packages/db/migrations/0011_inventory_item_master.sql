@@ -442,10 +442,10 @@ $$;
 -- decompose that way: a token can clear the threshold against the whole
 -- concatenation while clearing it against no single region, because trigrams
 -- straddle the joins. Measured, on the query 'sp1_6_00' (pg_trgm splits on
--- '_', giving a three-word probe): 0.333 against search_text, 0.0 against the
--- fitment text, 0.222 against the barcode — and 0.353 against the merged
--- haystack, which the final filter therefore keeps and the narrowing does not
--- offer. One such case in 3,387 fuzzed queries. It is a rare miss on the
+-- '_', giving a three-word probe): 0.333 against search_text, 0.111 against
+-- the closest of the item's fitment rows, 0.222 against the barcode — and
+-- 0.353 against the merged haystack, which the final filter therefore keeps
+-- and the narrowing does not offer. Roughly 0.06% of fuzzed queries. It is a rare miss on the
 -- weakest ranking tier, accepted knowingly in exchange for the scan, and it is
 -- the reason this says "superset" rather than "identical".
 --
@@ -531,9 +531,40 @@ AS $$
   -- the full scan it replaced, 1242ms against 980ms.
   --
   -- The longest token is the most selective one available without asking the
-  -- planner for statistics it does not have about a text column. It is a
-  -- heuristic, but a safe one: picking badly costs speed, never correctness,
-  -- because every candidate is re-checked against the merged haystack below.
+  -- planner for statistics it does not have about a text column.
+  --
+  -- It is a heuristic, and ALMOST always a pure speed one — but not entirely,
+  -- and the earlier version of this comment claimed otherwise. It said picking
+  -- badly costs speed and never correctness, because every candidate is
+  -- re-checked against the merged haystack below. That is wrong twice over: a
+  -- re-check cannot rescue a row that never became a candidate, and it
+  -- contradicts the qualification made ~90 lines above, that narrowing on any
+  -- single token is a superset for the LIKE branches and only best-effort for
+  -- the fuzzy one. Which token leads decides which side of that gap a row
+  -- falls on, so the choice is observable in results.
+  --
+  -- Measured on the smoke fixture, DESC (what this does) against ASC:
+  --
+  --   '905-r hayward'     DESC -> SP1600Z2   ASC -> nothing    truth SP1600Z2
+  --   'sp1_6_00 hayward'  DESC -> 1 row      ASC -> 2 rows     truth 2 rows
+  --
+  -- The first says the choice changes results. The second says THIS choice is
+  -- the one that loses a row: '905-r' scores 0.5 against SP1600Z2's merged
+  -- haystack and 0.0 against its search_text, so leading with it finds
+  -- nothing, while leading with 'hayward' reaches the row through branch 1.
+  --
+  -- Kept anyway, knowingly. Over 3,339 randomly fuzzed queries the two
+  -- orderings gave identical results every single time; both counterexamples
+  -- had to be constructed by searching ~1,345 tokens for one that clears the
+  -- threshold against a concatenation and against no single region, and both
+  -- lost rows land on the weakest ranking tier (0.40 and 0.28). Against that,
+  -- leading with the longest token is what makes 'hayward seal' 8x faster.
+  -- Trading a pathological miss on the bottom tier for that is the right
+  -- trade; pretending the miss does not exist is not.
+  --
+  -- Branch 1 is now the ONLY lead-token-only branch — barcodes and fitment
+  -- below scan every token — so the exposure is confined to rows whose sole
+  -- claim is their own text.
   --
   -- Barcodes and fitment stay per-token — EVERY token, not the lead one: a row
   -- can match through a barcode or a fitment entry rather than through its own
@@ -579,11 +610,35 @@ AS $$
     -- '0087654312098' against a stored '0087654321098' — one transposed
     -- digit — returned nothing, though word_similarity of the two is 0.571,
     -- comfortably over the 0.35 threshold, while the same query scores 0
-    -- against that item's search_text. Fuzzing 3,387 generated queries against
-    -- an un-narrowed reference implementation found 108 divergences and every
-    -- single one was this. With the line, 1.
+    -- against that item's search_text. Fuzzing several thousand generated
+    -- queries against an un-narrowed reference implementation found ~4%
+    -- divergent and every single one was this. With the line, ~0.06%, and
+    -- those are the merged-vs-region gap described above rather than this.
+    --
+    -- Counts are given as proportions on purpose: the corpus is synthetic and
+    -- generated fresh each run, so raw numbers do not reproduce and a comment
+    -- quoting them would rot into a false claim.
     --
     -- A transposed digit is the case line 350 says this index exists for.
+    --
+    -- COST, because it is not free and nothing else will point at this line.
+    -- The `<%` makes a SCAN — the fastest and most common thing that happens
+    -- at a counter — pay a fuzzy trigram scan over every stored barcode, and
+    -- stored barcodes are near-identical digit strings by construction. How
+    -- much that hurts depends entirely on how clustered the catalogue's GTINs
+    -- are, measured at ~20,000 barcodes:
+    --
+    --   200 vendor prefixes x ~100 items   171 fuzzy matches    53ms ->  104ms
+    --   all sharing a 9-digit prefix     20,000 fuzzy matches   129ms -> 2731ms
+    --
+    -- Real GS1 allocation sits between those, and a store buying deep from a
+    -- few vendors drifts toward the bad end. So the symptom to watch for is
+    -- "scanning got slow as the catalogue grew", and this is the line.
+    --
+    -- The obvious fix is wrong and was measured: gating the fuzzy predicate on
+    -- the exact lookup having missed recovers the speed and reintroduces the
+    -- superset violation, returning a different set on a clean scan than the
+    -- un-narrowed reference does. Do not add that guard.
     SELECT b.item_id
     FROM t
     CROSS JOIN LATERAL unnest(t.tokens, t.tokens_like) AS u(tok, tok_like)

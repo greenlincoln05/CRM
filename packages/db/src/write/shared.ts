@@ -204,3 +204,35 @@ export async function customerExists(db: Db, customerId: string): Promise<boolea
     SELECT 1 FROM customer WHERE id = ${customerId}::uuid
   `)).length > 0;
 }
+
+/**
+ * What is safe to store on a failed batch.
+ *
+ * 200 characters is enough for "fetch failed", "401 Unauthorized" or
+ * "getaddrinfo ENOTFOUND", which is the entire diagnostic value of this field.
+ * The truncation is marked so nobody reads a clipped message as a complete one.
+ *
+ * Deliberately NOT a redaction pass over the text. Guessing which substrings
+ * are personal is the approach that works until the day it doesn't.
+ *
+ * But be honest about what a length bound buys, because the first version of
+ * this comment was not. It bounds VOLUME, not CONTENT. The ADR requirement is
+ * a content property, and this does not deliver it: a short well-formed API
+ * error — `400 Bad Request: {"error":"no customer bob@example.com"}` — is 73
+ * characters and arrives whole, email included. What this does is cap the
+ * blast radius so a whole response body cannot land in a triage report. That
+ * is worth having and it is not the same as exclusion.
+ *
+ * `name` is bounded too, and that is not paranoia. `throw await res.json()` is
+ * an ordinary adapter mistake, and it hands this function an object whose
+ * `.name` is whatever the vendor put in that field — which for an order
+ * endpoint is plausibly a person's name. Measured before it was bounded: an
+ * error carrying a 5,000-character name stored all 5,000, walking straight
+ * past a limit that only ever inspected the other property.
+ */
+export function batchError(err: unknown): string {
+  const name = String((err as any)?.name ?? 'Error').slice(0, 40);
+  const message = String((err as any)?.message ?? err ?? '');
+  const clipped = message.length > 200 ? `${message.slice(0, 200)}… (truncated)` : message;
+  return clipped ? `${name}: ${clipped}` : name;
+}

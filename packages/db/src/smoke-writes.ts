@@ -29,6 +29,7 @@ import {
   recordWaterTest, flagReadings,
   createWorkOrder, rescheduleWorkOrder, cancelWorkOrder, TASK_TEMPLATES,
   listItemOnChannel, pushAvailabilityToChannel, pullChannelOrders,
+  batchError,
   WriteError,
 } from './write/index.js';
 // Imported by path rather than from the package root, and deliberately so: the
@@ -1329,15 +1330,28 @@ for (const spelling of ['VND-AB12', 'vnd-ab12']) {
 // the candidate scan, the other has to be reachable through a different
 // branch, so this fails if a non-lead branch is dropped.
 //
-// One thing these do NOT cover, stated because a review flagged it as a gap
-// and measuring it said otherwise. `ORDER BY length(tok) DESC` — which token
-// drives the scan — cannot be caught by any assertion on results, and this
-// suite does not catch it: flipping it to ASC leaves every check here passing.
-// That is correct behaviour, not missing coverage. Every token must match for
-// a row to qualify, so narrowing on ANY single token yields a superset and the
-// choice between them is purely a speed heuristic. Testing it needs a timing
-// assertion at scale, which does not belong in a suite that has to pass on a
-// laptop in seconds. Migration 0011 records the measurement instead.
+// `ORDER BY length(tok) DESC` in the candidate scan decides which token drives
+// it. I claimed in an earlier version of this comment that no assertion on
+// results could ever catch that line, because every token must match for a row
+// to qualify and narrowing on any single token therefore yields a superset.
+// That was wrong: it is a superset for the LIKE branches only. The fuzzy
+// branch compares a token against ONE region while the final filter compares
+// it against the merged concatenation, so which token leads decides which side
+// of that gap a row falls on.
+//
+// Hence the check below, which is the counterexample. '905-r' scores 0.5
+// against SP1600Z2's merged haystack and 0.0 against its own search_text, so a
+// scan led by '905-r' finds nothing and one led by 'hayward' finds the row.
+// Flip that ORDER BY to ASC and this check fails; nothing else here does.
+//
+// It is a deliberately pathological input and it is worth being clear about
+// why it is in a suite that otherwise tests real counter behaviour. It is not
+// here because someone will type it. It is here because the line it covers has
+// been mis-described in a comment twice, and a failing check is harder to talk
+// past than a paragraph.
+check('the candidate scan is driven by the longest token, which is observable',
+  (await findItems('905-r hayward')).some((h) => h.sku === 'SP1600Z2'),
+  'fails if the lead token is picked from the wrong end');
 check('a fitment word and a description word together find the part',
   (await findItems('raypak seal')).some((h) => h.sku === 'SP1600Z2'),
   'fitment Raypak 406A + description "Shaft seal"');
@@ -1370,6 +1384,47 @@ await db.execute(sql`
 check('a barcode typed with two digits transposed still finds the item',
   (await findItems('0087654312098')).some((h) => h.sku === 'TRV-001'),
   'stored 0087654321098, typed 0087654312098');
+
+
+// ── What a failed batch is allowed to record ───────────────────────────────
+//
+// `import_batch.error` is read in the same triage report as an import_issue
+// payload, and that payload is rebuilt from an allow-list precisely so a
+// customer's name or email cannot reach it. The error column had no such
+// bound, on either the channel path or the three ETL call sites that run
+// against real Evosus data today.
+//
+// A length bound is what is enforced here, not a redaction pass: guessing
+// which substrings are personal works until the day it doesn't. Be clear that
+// this caps blast radius rather than excluding PII — a short well-formed API
+// error carrying an email still arrives whole, and that is a known limit
+// rather than an oversight.
+console.log('\n── What a failed batch records ───────────────────────────\n');
+
+const longBody = `400 Bad Request: ${'x'.repeat(4000)}`;
+check('a response body pasted onto an error cannot arrive whole',
+  batchError(new Error(longBody)).length < 260,
+  `${batchError(new Error(longBody)).length} chars`);
+
+check('and the truncation is marked, so a clipped message is not read as complete',
+  batchError(new Error(longBody)).includes('(truncated)'));
+
+// The hole the bound had. `throw await res.json()` is an ordinary adapter
+// mistake and hands us an object whose `.name` is whatever the vendor wrote
+// there — which for an order endpoint is plausibly a person's name.
+const namedErr = Object.assign(new Error('boom'), { name: 'N'.repeat(5000) });
+check('a vendor-supplied error name cannot walk past the bound',
+  batchError(namedErr).length < 260, `${batchError(namedErr).length} chars`);
+
+// Bounding must not cost the diagnosis. An outage has to stay legible or the
+// column is worthless and someone will widen it again.
+check('an ordinary outage is still readable in full',
+  batchError(new Error('getaddrinfo ENOTFOUND shopify.example'))
+    === 'Error: getaddrinfo ENOTFOUND shopify.example');
+
+check('and a thrown non-Error does not become "undefined"',
+  batchError('connection reset') === 'Error: connection reset' && batchError(null).length > 0,
+  JSON.stringify(batchError(null)));
 
 
 console.log('\n── Every write carries a name ─────────────────────────────\n');
@@ -1467,8 +1522,30 @@ check('getTechnicians never returns a PIN hash',
 const jobRows = rows<Record<string, unknown>>(await db.execute(sql`
   SELECT w.*, p.label AS property_label
     FROM work_order w LEFT JOIN property p ON p.id = w.property_id`));
+// UUIDs are excluded before matching, and that is a fix rather than a
+// loophole. The demo gate code is '4417', four hex characters, and a random
+// v4 UUID contains that sequence about once every 2,300 — across the uuid
+// columns on a handful of job rows this check failed spuriously roughly one
+// run in a hundred. It did, on the run that added this comment:
+// customer_id 'ebe98bae-b8dc-4bdc-9e01-d604417c6273'.
+//
+// A gate-code guard that cries wolf is worse than one that does not exist,
+// because the response to a check that is known to be flaky is to stop reading
+// it — and this is the check protecting non-negotiable #4. A machine id cannot
+// carry a gate code in any sense a person could read; every field that could
+// is still scanned.
+const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const readable = jobRows.map((r) => Object.fromEntries(
+  Object.entries(r).filter(([, v]) => !(typeof v === 'string' && uuidLike.test(v)))));
+
+// Vacuity guard: if a schema change ever made every scanned column a uuid,
+// the check above would pass while reading nothing at all.
+check('there are readable work order fields for the gate-code check to scan',
+  readable.length > 0 && readable.some((r) => Object.keys(r).length > 0),
+  `${readable.length} row(s), ${Object.keys(readable[0] ?? {}).length} readable field(s)`);
+
 check('no work order row carries a gate code in any field',
-  !JSON.stringify(jobRows).includes('4417'),
+  !JSON.stringify(readable).includes('4417'),
   `${jobRows.length} job row(s) scanned`);
 
 console.log(`\n${failures === 0 ? 'ALL WRITE CHECKS PASSED' : `${failures} WRITE CHECK(S) FAILED`}`);
