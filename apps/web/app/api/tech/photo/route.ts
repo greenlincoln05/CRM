@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
 import { buildKey, putObject, getObject, sniffImage } from '@/lib/storage';
+import { assignedInWindow } from '@/lib/assignment';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,8 +129,23 @@ export async function GET(request: Request) {
   const { db } = await getDb();
   const rows = (r: any) => (r?.rows ?? r) as any[];
 
+  // Field scope, office trust — the same split as /api/gate-code, enforced
+  // with the same window (ADR 0009 via assignedInWindow). Folded into the
+  // SELECT so an out-of-scope photo and a nonexistent id return the exact
+  // same 404: a 403 here would confirm the attachment exists, and walking
+  // ids must confirm nothing. The property arm covers history photos on a
+  // house the technician is working today; the work-order arm covers a
+  // photo on their own job at a property-less work order.
+  const scope = user.role === 'tech'
+    ? sql` AND EXISTS (
+          SELECT 1 FROM work_order w
+           WHERE (w.property_id = a.property_id OR w.id = a.work_order_id)
+             AND ${assignedInWindow(user.userId)})`
+    : sql``;
+
   const row = rows(await db.execute(sql`
-    SELECT storage_key, mime_type FROM attachment WHERE id = ${id}::uuid`))[0];
+    SELECT a.storage_key, a.mime_type FROM attachment a
+     WHERE a.id = ${id}::uuid${scope}`))[0];
   if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
   const body = await getObject(row.storage_key);
@@ -138,8 +154,14 @@ export async function GET(request: Request) {
   return new Response(new Uint8Array(body), {
     headers: {
       'Content-Type': row.mime_type ?? 'image/jpeg',
-      // Immutable: an attachment id always points at the same bytes.
-      'Cache-Control': 'private, max-age=31536000, immutable',
+      // The bytes behind an id never change, but a technician's RIGHT to
+      // them does — it ends with the assignment. An hour bounds how long a
+      // browser cache outlives that (the same failure ADR 0009 records for
+      // codes cached on a device). Office access does not expire, so the
+      // office keeps the immutable year.
+      'Cache-Control': user.role === 'tech'
+        ? 'private, max-age=3600'
+        : 'private, max-age=31536000, immutable',
     },
   });
 }

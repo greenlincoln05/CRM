@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { decryptField, initFieldKey } from '@lcp/db';
 import { getDb } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
+import { assignedInWindow } from '@/lib/assignment';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,34 +64,11 @@ export async function POST(request: Request) {
   // Checked before the property is looked up, so a refusal does not also
   // answer "is there a code on file for this address".
   if (user.role === 'tech') {
-    // The window leans BACKWARD, not forward, because that is where the real
-    // need is. "Come back Thursday with the part" is the revisit the incomplete
-    // reason exists to generate, and it still carries Monday's date until
-    // somebody reschedules it - so a technician standing at that gate on
-    // Thursday needs yesterday and the day before, not next week. Forward,
-    // one day covers tomorrow's route being prepped tonight; anything further
-    // out just accumulates codes on a phone for houses nobody is visiting yet.
-    //
-    // The undated branch is bounded by updated_at rather than left open. An
-    // assigned job with no date is a real job - same-day emergencies are
-    // assigned before they are dated, and the office's own job list sorts
-    // dateless work to the top as "still waiting on somebody" - but without a
-    // bound, one job parked in March is an open-ended key to that house.
-    //
-    // CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York', never CURRENT_DATE -
-    // the server clock is GMT and CURRENT_DATE rolls over in the evening here.
     const assigned = rows(await db.execute(sql`
       SELECT 1
       FROM work_order w
       WHERE w.property_id = ${propertyId}::uuid
-        AND w.assigned_user_id = ${user.userId}::uuid
-        AND w.status <> 'cancelled'
-        AND (
-          (w.scheduled_date IS NULL AND w.updated_at > now() - interval '2 days')
-          OR w.scheduled_date BETWEEN
-               (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date - 2
-           AND (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::date + 1
-        )
+        AND ${assignedInWindow(user.userId)}
       LIMIT 1`));
 
     if (!assigned.length) {
