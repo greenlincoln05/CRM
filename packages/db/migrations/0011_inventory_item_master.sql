@@ -434,6 +434,21 @@ $$;
 -- a superset of the answer, and "matches all tokens" implies "matches at
 -- least one", so narrowing on ANY is both index-friendly and correct.
 --
+-- That superset argument is exact for the LIKE branches and only best-effort
+-- for the fuzzy one, and the difference is worth stating rather than glossing.
+-- No token can span the ' ' separators, so a substring of the merged haystack
+-- is a substring of one of the regions that were concatenated to build it, and
+-- checking the regions separately loses nothing. word_similarity does not
+-- decompose that way: a token can clear the threshold against the whole
+-- concatenation while clearing it against no single region, because trigrams
+-- straddle the joins. Measured, on the query 'sp1_6_00' (pg_trgm splits on
+-- '_', giving a three-word probe): 0.333 against search_text, 0.0 against the
+-- fitment text, 0.222 against the barcode — and 0.353 against the merged
+-- haystack, which the final filter therefore keeps and the narrowing does not
+-- offer. One such case in 3,387 fuzzed queries. It is a rare miss on the
+-- weakest ranking tier, accepted knowingly in exchange for the scan, and it is
+-- the reason this says "superset" rather than "identical".
+--
 -- ── Ranking ─────────────────────────────────────────────────────────────────
 --
 -- It has to serve one counter and two input methods. Someone TYPES ("hayward
@@ -520,10 +535,21 @@ AS $$
   -- heuristic, but a safe one: picking badly costs speed, never correctness,
   -- because every candidate is re-checked against the merged haystack below.
   --
-  -- Barcodes and fitment stay per-token: a row can match the lead token
-  -- through a barcode or a fitment entry rather than through its own text, and
-  -- dropping those branches would lose it. Both tables are far smaller than
-  -- `item`, so any-token is affordable there.
+  -- Barcodes and fitment stay per-token — EVERY token, not the lead one: a row
+  -- can match through a barcode or a fitment entry rather than through its own
+  -- text, and dropping those branches would lose it. Both tables are far
+  -- smaller than `item`, so any-token is affordable there. The barcode branch
+  -- said this in a comment while doing lead-token-only for one review cycle,
+  -- which is part of why the missing `<%` below read as safe on inspection.
+  --
+  -- One honest limit on the win. Picking the longest token helps only when
+  -- there is a choice to make. A single-word query has no better token
+  -- available, and if that word is short and common the narrowing buys almost
+  -- nothing: measured at 20,010 items, 'hayward seal' goes 2296ms -> 262ms,
+  -- but bare 'seal' goes 2308ms -> 2221ms, because 'seal' <% search_text is
+  -- true for 20,005 of 20,010 rows. 'seal' is a word the counter types. The
+  -- fix for that is a smaller threshold or a different index, not a different
+  -- token, and it is not attempted here.
   cand AS (
     -- item.search_text, bare, so item_search_trgm_idx can serve it.
     --
@@ -542,14 +568,29 @@ AS $$
 
     UNION
 
-    -- item_barcode.code: the exact normalized lookup (barcode_norm index) and
-    -- the partial typed code (code trigram index)
+    -- item_barcode.code: the exact normalized lookup (barcode_norm index), the
+    -- partial typed code, and the FUZZY code (both on the code trigram index).
+    --
+    -- The `<%` is not decoration and leaving it out was a real bug. The final
+    -- filter accepts a row when a token is merely word_similar to the merged
+    -- haystack, and the barcodes are part of that haystack — so a row whose
+    -- only claim is a fuzzy barcode match passes the filter and must therefore
+    -- survive the narrowing. Without this line it did not. Measured: a scan of
+    -- '0087654312098' against a stored '0087654321098' — one transposed
+    -- digit — returned nothing, though word_similarity of the two is 0.571,
+    -- comfortably over the 0.35 threshold, while the same query scores 0
+    -- against that item's search_text. Fuzzing 3,387 generated queries against
+    -- an un-narrowed reference implementation found 108 divergences and every
+    -- single one was this. With the line, 1.
+    --
+    -- A transposed digit is the case line 350 says this index exists for.
     SELECT b.item_id
     FROM t
-    CROSS JOIN LATERAL unnest(t.lead_likes) AS u(tok_like)
+    CROSS JOIN LATERAL unnest(t.tokens, t.tokens_like) AS u(tok, tok_like)
     JOIN item_barcode b
       ON (length(t.qdigits) >= 8 AND barcode_norm(b.code) = barcode_norm(t.qdigits))
       OR lower(b.code) LIKE '%' || u.tok_like || '%'
+      OR u.tok <% lower(b.code)
     WHERE t.qtext <> ''
 
     UNION

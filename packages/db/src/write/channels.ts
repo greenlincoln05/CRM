@@ -463,13 +463,42 @@ export async function pullChannelOrders(
     // a failed batch behind rather than a silent no-op. A pull that "found no
     // orders" because the token expired is how a week of web orders goes
     // unnoticed.
+    //
+    // Bounded, for the same reason recordIssue() rebuilds its payload from an
+    // allow-list. `import_batch.error` is read in a triage report next to that
+    // payload, and a real HTTP adapter throws with the response body on the
+    // message - an API that answers a bad request by echoing the order it
+    // could not process would put a customer's email in here, past a filter
+    // that only ever inspected the other column. The name and a short message
+    // say which channel failed and roughly why, which is what this field is
+    // for; the full error still propagates to the caller and the log.
     await db.execute(sql`
       UPDATE import_batch SET status = 'failed', finished_at = now(),
-             error = ${String((err as any)?.message ?? err)}
+             error = ${batchError(err)}
        WHERE id = ${batchId}::uuid
     `);
     throw err;
   }
+}
+
+/**
+ * What is safe to store on a failed batch.
+ *
+ * 200 characters is enough for "fetch failed", "401 Unauthorized" or
+ * "getaddrinfo ENOTFOUND" — which is the entire diagnostic value of this
+ * field — and short enough that a response body pasted onto an error message
+ * cannot arrive whole. The truncation is marked so nobody reads a clipped
+ * message as the complete one.
+ *
+ * Deliberately NOT a redaction pass over the text. Guessing which substrings
+ * are personal is the approach that works until the day it doesn't; a length
+ * bound is a rule that holds regardless of what the channel decided to say.
+ */
+function batchError(err: unknown): string {
+  const name = (err as any)?.name ?? 'Error';
+  const message = String((err as any)?.message ?? err ?? '');
+  const clipped = message.length > 200 ? `${message.slice(0, 200)}… (truncated)` : message;
+  return clipped ? `${name}: ${clipped}` : name;
 }
 
 /**

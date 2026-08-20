@@ -1319,6 +1319,58 @@ for (const spelling of ['VND-AB12', 'vnd-ab12']) {
     (await findItems(spelling)).some((h) => h.sku === 'TRV-001'));
 }
 
+// ── Multi-token queries, which exercise a different code path entirely ─────
+//
+// Every check above passes ONE token, so the all-tokens ranking tier and the
+// bool_and disjunct in the final filter were never reached by anything.
+//
+// The two tokens here differ in length AND live in different tables: 'raypak'
+// is fitment text, 'seal' is the item's own description. Whichever one drives
+// the candidate scan, the other has to be reachable through a different
+// branch, so this fails if a non-lead branch is dropped.
+//
+// One thing these do NOT cover, stated because a review flagged it as a gap
+// and measuring it said otherwise. `ORDER BY length(tok) DESC` — which token
+// drives the scan — cannot be caught by any assertion on results, and this
+// suite does not catch it: flipping it to ASC leaves every check here passing.
+// That is correct behaviour, not missing coverage. Every token must match for
+// a row to qualify, so narrowing on ANY single token yields a superset and the
+// choice between them is purely a speed heuristic. Testing it needs a timing
+// assertion at scale, which does not belong in a suite that has to pass on a
+// laptop in seconds. Migration 0011 records the measurement instead.
+check('a fitment word and a description word together find the part',
+  (await findItems('raypak seal')).some((h) => h.sku === 'SP1600Z2'),
+  'fitment Raypak 406A + description "Shaft seal"');
+
+// Order must not matter - "seal raypak" is the same question asked backwards,
+// and it swaps which token is longest only if length is not what decides.
+check('and the same two words in the other order',
+  (await findItems('seal raypak')).some((h) => h.sku === 'SP1600Z2'));
+
+// A second word must NARROW, never widen. This is the rule 0004 and 0005 set
+// for customer search and the one users actually rely on when a first guess
+// returns too much.
+const oneWord = await findItems('seal');
+const twoWords = await findItems('raypak seal');
+check('a second word narrows the result rather than widening it',
+  twoWords.length <= oneWord.length && twoWords.length > 0,
+  `"seal" ${oneWord.length} hits, "raypak seal" ${twoWords.length}`);
+
+// A transposed digit in a scanned code. Line 350 of migration 0011 says the
+// barcode trigram index exists for exactly this, and for one review cycle it
+// did not work: the candidate scan matched barcodes by LIKE only, so a code
+// that no longer matches literally was dropped before the fuzzy filter that
+// would have kept it ever ran. word_similarity of the two codes is 0.571; the
+// query scores 0 against the item's text, so the barcode branch is the only
+// way this row can be reached.
+await db.execute(sql`
+  INSERT INTO item_barcode (item_id, code, symbology)
+  VALUES (${accented.id}::uuid, '0087654321098', 'ean_13')
+`);
+check('a barcode typed with two digits transposed still finds the item',
+  (await findItems('0087654312098')).some((h) => h.sku === 'TRV-001'),
+  'stored 0087654321098, typed 0087654312098');
+
 
 console.log('\n── Every write carries a name ─────────────────────────────\n');
 
