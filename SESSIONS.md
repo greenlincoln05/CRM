@@ -282,3 +282,100 @@ marker in any other repository acted as a skeleton key for this one,
 recovery instructions did not run in PowerShell. All closed. A gate that is
 believed while doing nothing is worse than no gate, which is the whole lesson
 of this stretch.
+
+## 2026-08-20 — Found unlogged: Phase 3 inventory shipped without a session entry
+
+**Found, not built this session.** Eight commits on `main` before this session
+started (`d73025b` "Phase 3 begins: item master, barcodes, fitment, and a
+channel seam" through `df51658`, the four intermediate commits being review
+rounds and a fuzzy-search fix) shipped `packages/db/src/schema/inventory.ts`,
+migrations `0011_inventory_item_master.sql` and
+`0012_inventory_channel_listing.sql`, `packages/db/src/write/channels.ts`, and
+roughly 1000 lines of new smoke checks — with no `SESSIONS.md` entry for any of
+it. This entry records the gap rather than reconstructing a history that wasn't
+written at the time. Treat Phase 3 inventory (item master, barcodes, fitment,
+channel listings) as shipped and smoke-tested as of `df51658`, on the record
+for the first time here.
+
+## 2026-08-20 — Capacity-aware scheduling; gate-code scoping closes ADR 0009; docs unified
+
+**Built**, on branch `service-story` (created from `df51658`), 10 commits
+(`ac685e2` through `ff810c8`):
+
+- Migration 0013 (`packages/db/migrations/0013_bumpy_luckman.sql`):
+  `app_user.daily_capacity_minutes`, default 480.
+- `packages/db/src/write/workOrders.ts` — a capacity rule on the write layer:
+  scheduling into an already-full day is refused unless the caller passes an
+  explicit override, which is recorded on the timeline. 11 new smoke checks. A
+  LEFT-JOIN phantom-row bug in the planned SQL fixed with
+  `FILTER (WHERE w.id IS NOT NULL)`.
+- Day board (`apps/web/app/(office)/schedule/page.tsx`): per-technician load
+  display, override checkboxes on both scheduling forms; `getDaySchedule` now
+  carries `assignee_capacity`.
+- ADR 0009 (who may reveal a gate code, scoped to the assigned job) landed in
+  code: the window predicate is now shared, in
+  `apps/web/lib/assignment.ts`, between `/api/gate-code` and a newly
+  job-scoped `/api/tech/photo` GET — an out-of-scope request gets the same 404
+  either way, so the response shape doesn't leak which is true. Tech-side
+  cache is 1 hour; office is immutable. 7 new live probes in
+  `apps/web/scripts/smoke-tech-api.ts` (52/52 total). A uuid-shape 400 guard
+  was added to the photo GET to match the reveal endpoint, plus a TOCTOU
+  comment on `assertCapacity`.
+- `DEMO.md` created as the single unified context document, reconciling
+  `CORE.md`'s business requirements into it; `README.md` rewritten as a
+  landing page, the old version kept at `archive/README-2026-08-20.md`;
+  `CLAUDE.md` pointers updated to match.
+- Dated closure notes added to ADRs 0003, 0009, and 0010 for the photo-scoping
+  item.
+
+**Correction to STATE.md's prior "Next up".** Both of its first two items were
+already done in code before this session started: an `incomplete_reason` write
+path from the phone (phone → sync endpoint) exists, and gate-code scoping per
+ADR 0009 was implemented in a prior, unlogged stretch (see the entry above).
+Neither needed doing here; ADR 0009's own scoping closure and the photo-GET
+parity were the actual open thread, and that's what this session finished.
+
+**Broke, then recovered.** `.pgdata` was corrupted again by the same failure
+CLAUDE.md and the 2026-08-18 incident both name: a dev server was still
+holding the PGlite lock when a migrate opened the database, and killing it
+mid-run completed the damage. The corrupt directory is preserved untouched at
+`./.pgdata` (not deleted, not repaired). A gitignored repo-root `.env` was
+created with `PGLITE_DIR=/Users/mkozak/GitHub/CRM/.pgdata2`, and the database
+was rebuilt there — migrate clean through 0013, `etl demo` 42/42. `.gitignore`
+widened from `.pgdata/` to `.pgdata*/` so the corrupt original and its
+replacement can sit side by side without either being tracked. Synthetic data
+only; nothing real was at risk. **Carry-forward gotcha:** the smoke suites do
+not read `.env`, so any smoke run against `.pgdata2` needs
+`PGLITE_DIR=/Users/mkozak/GitHub/CRM/.pgdata2` set explicitly on the command
+line, not just present in `.env`.
+
+**Verified.** `smoke:writes` green including the 11 new capacity checks;
+`smoke-tech-api` 52/52 against a freshly started server; `typecheck` clean;
+`etl demo` 42/42; a real-browser click-through of capacity refusal →
+book-anyway override → the timeline arithmetic → the over-capacity day board.
+
+**Reviewed.** `repo-reviewer` and `sensitive-data-guard` both ran clean;
+repo-reviewer's ADR-staleness finding was fixed in `e254991`. A final
+whole-branch review found two Important findings, both fixed (`bfe6223`,
+`ac49a3b`) and re-verified. Push to `origin/service-story` and the merge-to-
+main decision are outside this entry.
+
+**Decided.** Nothing new architecturally — ADR 0009 was already accepted; this
+session implemented what it specified and closed the gap it left open.
+
+**Still open, unchanged.** ADR 0004 vs 0006 contradiction (same app, two
+accepted ADRs disagree); KMS key generation and the sealed offline copy not
+done; key rotation unwritten; nothing provisioned (Vercel/Neon/R2/AWS);
+Evosus discovery needs credentials or a vendor export.
+
+**New, deferred this session.** A smoke assertion for the reschedule-override
+timeline note, and a check that completed/incomplete jobs still count toward
+capacity, were scoped but not written. React 19's form-action reset clears
+form fields after a *failed* submit — an `ActionForm`-wide UX issue, not fixed.
+A `FIELD_ROLES` allow-list to mirror `DISPATCH_ROLES` on the two field-scoped
+read surfaces was named but not built. The photo-GET timing side-channel is
+noted in code as defense-in-depth only, not closed.
+
+**Next.** Resolve ADR 0004 vs 0006; generate and seal the KMS key with
+rotation written first; the two deferred smoke assertions above; then Evosus
+discovery once credentials exist.
